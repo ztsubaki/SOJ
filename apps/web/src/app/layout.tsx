@@ -4,6 +4,8 @@ import "./globals.css";
 import { AuthProvider } from "@/components/auth-provider";
 import { SiteNavbar } from "@/components/site-navbar";
 import { ToastProvider } from "@/components/toast-provider";
+import { PlatformNameProvider } from "@/components/platform-name-provider";
+import { getPlatformName } from "@/lib/server/platform-name";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,16 +17,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "SOJ | HPC Performance Arena",
-  description: "面向高性能计算应用的在线测评平台",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const platformName = await getPlatformName();
+  return {
+    title: `${platformName} | HPC Performance Arena`,
+    description: `面向高性能计算应用的在线测评平台 · ${platformName}`,
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const platformName = await getPlatformName();
   return (
     <html
       lang="zh-CN"
@@ -50,12 +56,14 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col">
-        <ToastProvider>
-          <AuthProvider>
-            <SiteNavbar />
-            <main className="flex-1">{children}</main>
-          </AuthProvider>
-        </ToastProvider>
+        <PlatformNameProvider name={platformName}>
+          <ToastProvider>
+            <AuthProvider>
+              <SiteNavbar />
+              <main className="flex-1">{children}</main>
+            </AuthProvider>
+          </ToastProvider>
+        </PlatformNameProvider>
       </body>
     </html>
   );

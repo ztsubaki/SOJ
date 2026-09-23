@@ -6,10 +6,12 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { useAuth } from "@/context/AuthContext";
 import { ToastMessage } from "@/context/ToastContext";
+import { usePlatformName } from "@/context/PlatformNameContext";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 export default function ChangePasswordPage() {
+  const platformName = usePlatformName();
   const { changePassword, status, user } = useAuth();
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -51,7 +53,7 @@ export default function ChangePasswordPage() {
         aria-labelledby="change-password-title"
       >
         <p className="text-theme-sm font-semibold text-brand-500 dark:text-brand-400">
-          SOJ 管理后台
+          {platformName} 管理后台
         </p>
         <h1
           id="change-password-title"

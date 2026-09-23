@@ -4,17 +4,23 @@ import { SidebarProvider } from "@/context/SidebarContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { ToastProvider } from "@/context/ToastContext";
+import { PlatformNameProvider } from "@/context/PlatformNameContext";
+import { getPlatformName } from "@/lib/server/platform-name";
 
-export const metadata: Metadata = {
-  title: "SOJ 管理后台",
-  description: "SOJ 在线测评平台管理后台",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const platformName = await getPlatformName();
+  return {
+    title: `${platformName} 管理后台`,
+    description: `${platformName} 在线测评平台管理后台`,
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const platformName = await getPlatformName();
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
@@ -36,13 +42,15 @@ export default function RootLayout({
         />
       </head>
       <body className="dark:bg-gray-900">
-        <ToastProvider>
-          <ThemeProvider>
-            <AuthProvider>
-              <SidebarProvider>{children}</SidebarProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </ToastProvider>
+        <PlatformNameProvider name={platformName}>
+          <ToastProvider>
+            <ThemeProvider>
+              <AuthProvider>
+                <SidebarProvider>{children}</SidebarProvider>
+              </AuthProvider>
+            </ThemeProvider>
+          </ToastProvider>
+        </PlatformNameProvider>
       </body>
     </html>
   );

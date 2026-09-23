@@ -42,6 +42,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL="" \
+    PLATFORM_NAME=SOJ \
     GRPC_ADDR=127.0.0.1:50051 \
     CONTROL_PLANE_HTTP_URL=http://127.0.0.1:8080 \
     ARTIFACT_ROOT=/var/lib/soj/artifacts

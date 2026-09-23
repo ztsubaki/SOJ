@@ -4,10 +4,12 @@ import Badge from "@/components/ui/badge/Badge";
 import Button from "@/components/ui/button/Button";
 import { useAuth } from "@/context/AuthContext";
 import { useSidebar } from "@/context/SidebarContext";
+import { usePlatformName } from "@/context/PlatformNameContext";
 import Link from "next/link";
 import React from "react";
 
 const AppHeader: React.FC = () => {
+  const platformName = usePlatformName();
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
   const { user, signOut } = useAuth();
 
@@ -63,13 +65,13 @@ const AppHeader: React.FC = () => {
 
           <Link href="/" className="lg:hidden">
             <span className="text-lg font-bold text-gray-900 dark:text-white">
-              SOJ
+              {platformName}
             </span>
           </Link>
 
           <div className="hidden lg:block">
             <h1 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-              SOJ 管理后台
+              {platformName} 管理后台
             </h1>
           </div>
         </div>

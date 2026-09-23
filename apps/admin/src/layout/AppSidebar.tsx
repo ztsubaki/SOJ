@@ -3,6 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "@/context/SidebarContext";
+import { usePlatformName } from "@/context/PlatformNameContext";
 import {
   CalenderIcon,
   GridIcon,
@@ -32,6 +33,7 @@ const othersItems: NavItem[] = [
 ];
 
 const AppSidebar: React.FC = () => {
+  const platformName = usePlatformName();
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
 
@@ -98,11 +100,11 @@ const AppSidebar: React.FC = () => {
         <Link href="/">
           {isExpanded || isHovered || isMobileOpen ? (
             <span className="text-xl font-bold text-gray-900 dark:text-white">
-              SOJ 管理后台
+              {platformName} 管理后台
             </span>
           ) : (
             <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500 text-white font-bold">
-              S
+              {platformName.slice(0, 1).toUpperCase()}
             </span>
           )}
         </Link>

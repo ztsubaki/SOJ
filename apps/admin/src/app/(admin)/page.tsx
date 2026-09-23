@@ -14,12 +14,14 @@ import {
 import type { SubmissionDetail } from "@/lib/admin-types";
 import { verdictColor } from "@/lib/presentation";
 import { ToastMessage } from "@/context/ToastContext";
+import { usePlatformName } from "@/context/PlatformNameContext";
 type Stats = {
   totalUsers: number;
   todaySubmissions: number;
   pendingSubmissions: number;
 };
 export default function DashboardPage() {
+  const platformName = usePlatformName();
   const [stats, setStats] = useState<Stats | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionDetail[]>([]);
   const [error, setError] = useState("");
@@ -49,7 +51,7 @@ export default function DashboardPage() {
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
           总览
         </h2>
-        <p className="text-gray-500">欢迎使用 SOJ 管理后台。</p>
+        <p className="text-gray-500">欢迎使用 {platformName} 管理后台。</p>
       </div>
       {cards.map((x) => (
         <div key={x.label} className="col-span-12 sm:col-span-6 xl:col-span-4">

@@ -24,23 +24,47 @@ lint and build commands still run from their owning directories. Go and Rust
 remain independent services. Local Control Plane artifact files live under
 `services/api/data/` and are ignored by Git.
 
-## Container image (without Judge Agent)
+## 构建并运行镜像
 
 The root [`Dockerfile`](Dockerfile) builds a single Linux image containing
 Web (port 3000), Admin (port 3001), and Control Plane (gRPC 50051 and HTTP
 8080). PostgreSQL, artifact object storage, TLS termination, and Judge Agent
 remain external. The Judge source is excluded from the Docker build context.
 
+先创建 PostgreSQL 数据库，并在启动容器前由运维人员手动应用初始 Schema：
+
+```bash
+createdb soj
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f services/api/schema.sql
+```
+
+`schema.sql` 只适用于空数据库。Control Plane 不会自动建表或执行迁移；升级已有
+数据库请按 [`docs/database.md`](docs/database.md#schema与运维) 中的版本化 SQL 操作。
+
+构建镜像：
+
 ```bash
 docker build -t soj .
+```
+
+然后以 PostgreSQL 连接串和独立的 Agent 服务令牌启动。以下示例把 Artifact 和 TLS
+材料放在 Docker volume 中；生产部署应使用持久卷或受控的宿主机挂载路径。
+
+```bash
 docker run --rm \
+  --name soj \
   -p 3000:3000 -p 3001:3001 -p 50051:50051 -p 8080:8080 \
   -e DATABASE_URL='postgres://…' \
   -e AGENT_SERVICE_TOKEN='…' \
+  -e PLATFORM_NAME='SOJ' \
   -v soj-artifacts:/var/lib/soj/artifacts \
   -v soj-tls:/var/lib/soj/tls \
   soj
 ```
+
+Set `PLATFORM_NAME` to change the name shown in Web and Admin; it defaults to
+`SOJ` and is read when the container handles a request, so the same image can
+be deployed with a different name.
 
 The example exposes plain HTTP for local testing. To log in through it, add
 `-e SESSION_COOKIE_SECURE=false`; never use that setting in a public deployment.
@@ -77,6 +101,56 @@ comma-separated allowlist such as `example.edu,students.example.edu` to limit
 public registration to those exact email domains. When it is unset, any
 syntactically valid email address may register. Invalid allowlist entries make
 the Control Plane refuse to start.
+
+## 构建并运行 Judge Agent
+
+Judge Agent 不包含在 `soj` 镜像中。它应运行在可调用 `sbatch`、`squeue`、`sacct`
+和 `scancel` 的 Slurm 提交节点，并且 `judge_work_root` 必须能被该节点和计算节点
+共同访问。Agent 只经 gRPC 与受认证的 HTTP Artifact 接口连接 Control Plane，绝不
+连接 PostgreSQL，也不与 Control Plane 共享本地目录。
+
+在 Agent 主机上从源码构建二进制：
+
+```bash
+cd services/judge
+cargo build --release
+install -Dm755 target/release/soj-judge /usr/local/bin/soj-judge
+install -Dm600 judge.toml.example /etc/soj/judge.toml
+```
+
+编辑 `/etc/soj/judge.toml`。`agent_service_token` 必须与容器的
+`AGENT_SERVICE_TOKEN` 完全一致；`grpc_ca_file` 是签发 Control Plane gRPC 证书的
+CA PEM。生产中请在挂载 `/var/lib/soj/tls` 前提供由部署方管理的 CA 和服务端证书，
+并将同一份 CA 安全地安装到 Agent 主机。服务端证书的 SAN 必须包含
+`control-plane.internal`（或此处使用的其他主机名）。
+
+```toml
+agent_partition = "judge"
+agent_service_token = "与 AGENT_SERVICE_TOKEN 相同的强随机值"
+judge_work_root = "/var/lib/soj-judge/work"
+judge_idle_poll_ms = 1000
+
+grpc_addr = "control-plane.internal:50051"
+grpc_ca_file = "/etc/soj/control-plane-ca.pem"
+control_plane_http_url = "https://control-plane.internal:8080"
+```
+
+当 `grpc_addr` 使用 IP、而证书 SAN 使用 DNS 名称时，额外设置
+`grpc_server_name = "control-plane.internal"`。`control_plane_http_url` 可以使用
+`http://`，但 Agent 会警告该连接未加密，因此只应在受信任的隔离网络使用。不要在
+部署中设置 `grpc_insecure_dev = true`；它只适用于 loopback 本地开发。
+
+完成配置后启动 Agent：
+
+```bash
+soj-judge /etc/soj/judge.toml
+```
+
+Agent 会注册一个新的会话并为配置的 partition 主动领取任务。收到 SIGTERM 或被标记
+为 draining 后，它会停止领取新任务、继续处理已领取任务，再退出。发布到真实
+partition 前，请使用实际测评包验证正常、超时、OOM、取消和节点故障路径。更多执行
+与 Slurm 约束见 [`services/judge/README.md`](services/judge/README.md) 和
+[`docs/judge.md`](docs/judge.md)。
 
 ## Documentation
 

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth-provider";
 import { ThemeControls } from "@/components/theme-controls";
+import { usePlatformName } from "@/components/platform-name-provider";
 
 const navigation = [
   { href: "/", label: "首页" },
@@ -12,6 +13,7 @@ const navigation = [
 ];
 
 export function SiteNavbar() {
+  const platformName = usePlatformName();
   const pathname = usePathname();
   const router = useRouter();
   const { isLoading, signOut, user } = useAuth();
@@ -44,7 +46,7 @@ export function SiteNavbar() {
           </ul>
         </details>
         <Link href="/" className="btn btn-ghost text-xl font-bold">
-          SOJ
+          {platformName}
         </Link>
       </div>
       <div className="navbar-center hidden lg:flex">

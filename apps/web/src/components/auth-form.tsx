@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@soj/bff/client";
 import { useAuth } from "@/components/auth-provider";
 import { ToastMessage, useToast } from "@/components/toast-provider";
+import { usePlatformName } from "@/components/platform-name-provider";
 
 const emailFormat = /^[!-~]+@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 
@@ -43,6 +44,7 @@ function authErrorMessage(reason: unknown, mode: "login" | "register") {
 }
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
+  const platformName = usePlatformName();
   const router = useRouter();
   const { signIn, signUp, sendRegistrationEmailVerification } = useAuth();
   const { show } = useToast();
@@ -166,8 +168,8 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             </h1>
             <p className="mt-2 text-sm text-base-content/70">
               {isRegister
-                ? "创建 SOJ 账号以参与 HPC 测评"
-                : "登录 SOJ 以查看比赛与提交记录"}
+                ? `创建 ${platformName} 账号以参与 HPC 测评`
+                : `登录 ${platformName} 以查看比赛与提交记录`}
             </p>
           </div>
 

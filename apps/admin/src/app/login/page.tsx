@@ -6,10 +6,12 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { useAuth } from "@/context/AuthContext";
 import { ToastMessage } from "@/context/ToastContext";
+import { usePlatformName } from "@/context/PlatformNameContext";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 export default function LoginPage() {
+  const platformName = usePlatformName();
   const { status, user, signIn, signOut } = useAuth();
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -52,7 +54,7 @@ export default function LoginPage() {
         aria-labelledby="login-title"
       >
         <p className="text-theme-sm font-semibold text-brand-500 dark:text-brand-400">
-          SOJ 管理后台
+          {platformName} 管理后台
         </p>
         <h1
           id="login-title"

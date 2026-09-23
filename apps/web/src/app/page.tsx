@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { contestSummary } from "@/lib/contest-summary";
 import { getHomeData } from "@/lib/server/bff";
+import { getPlatformName } from "@/lib/server/platform-name";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,10 @@ const contestStatusLabels: Record<string, string> = {
 };
 
 export default async function Home() {
-  const { contests, cluster } = await getHomeData();
+  const [{ contests, cluster }, platformName] = await Promise.all([
+    getHomeData(),
+    getPlatformName(),
+  ]);
   const featuredContests = contests.filter(
     (contest) => contest.status !== "ended",
   );
@@ -46,7 +50,7 @@ export default async function Home() {
       <section className="hero min-h-48 bg-base-300 md:min-h-64">
         <div className="hero-content w-full max-w-7xl justify-start px-4 text-left md:px-6 lg:px-8">
           <div>
-            <h1 className="text-4xl font-bold sm:text-5xl">SOJ</h1>
+            <h1 className="text-4xl font-bold sm:text-5xl">{platformName}</h1>
             <p className="mt-4 text-base-content/80">
               面向 HPC 应用的在线测评平台
             </p>
