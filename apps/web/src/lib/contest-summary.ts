@@ -1,3 +1,4 @@
 export function contestSummary(value: string) {
-  return value.replace(/^\s{0,3}#{1,6}[ \t]+/gm, "").trim();
+  const firstLine = value.trimStart().split(/\r?\n/, 1)[0] ?? "";
+  return firstLine.replace(/^\s{0,3}#{1,6}[ \t]+/, "").trim();
 }

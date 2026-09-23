@@ -95,7 +95,7 @@ export default async function Home() {
                     <div className="text-2xl font-thin tabular-nums text-base-content/60">
                       {String(index + 1).padStart(2, "0")}
                     </div>
-                    <div className="list-col-grow">
+                    <div className="list-col-grow min-w-0">
                       <Link
                         className="font-medium hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
                         href={`/contests/${contest.id}`}
@@ -103,7 +103,7 @@ export default async function Home() {
                         {contest.title}
                       </Link>
                       {contestSummary(contest.description) && (
-                        <p className="mt-1 line-clamp-2 text-base leading-7 text-base-content/70">
+                        <p className="mt-1 truncate text-sm text-base-content/70">
                           {contestSummary(contest.description)}
                         </p>
                       )}
