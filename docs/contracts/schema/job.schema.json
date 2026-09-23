@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://soj.dev/schema/job/v1/job.schema.json",
+  "title": "SOJ judge package job context v1",
+  "description": "Authoritative context contract for ./job.json relative to the Slurm batch working directory work/<job-id>. Submission bytes are always at ./submission/source; no paths, credentials or execution resource configuration are supplied here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "jobId", "submission"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "jobId": { "type": "integer", "minimum": 1 },
+    "submission": {
+      "description": "Untrusted display metadata only. Neither field may select a filesystem path or be interpolated into a shell command.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "contentType"],
+      "properties": {
+        "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "contentType": { "type": "string", "minLength": 1, "maxLength": 255 }
+      }
+    }
+  },
+  "$defs": {}
+}

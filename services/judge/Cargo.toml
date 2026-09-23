@@ -1,0 +1,28 @@
+[package]
+name = "soj-judge"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+futures-util = "0.3"
+libc = "0.2"
+prost = "0.13"
+prost-types = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tar = "0.4"
+toml = "0.8"
+tokio = { version = "1.43", features = ["fs", "macros", "process", "rt-multi-thread", "signal", "time"] }
+tonic = { version = "0.12", features = ["tls", "tls-roots"] }
+uuid = { version = "1.12", features = ["v4"] }
+zstd = "0.13"
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["test-util"] }
+
+[build-dependencies]
+protoc-bin-vendored = "3.1"
+tonic-build = "0.12"

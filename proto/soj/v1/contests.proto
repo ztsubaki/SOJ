@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "google/protobuf/timestamp.proto";
+import "soj/v1/common.proto";
+
+service ContestService {
+  rpc ListContests(ListContestsRequest) returns (ListContestsResponse);
+  rpc GetContest(GetContestRequest) returns (GetContestResponse);
+  rpc ListContestProblems(ListContestProblemsRequest) returns (ListContestProblemsResponse);
+  rpc GetContestProblem(GetContestProblemRequest) returns (GetContestProblemResponse);
+  rpc GetLeaderboard(GetLeaderboardRequest) returns (GetLeaderboardResponse);
+  rpc ListParticipants(ListParticipantsRequest) returns (ListParticipantsResponse);
+  rpc RegisterForContest(RegisterForContestRequest) returns (RegisterForContestResponse);
+}
+
+message ListContestsRequest {
+  optional ContestStatus status = 1;
+  optional string query = 2;
+  PageRequest page = 3;
+}
+
+message ListContestsResponse {
+  repeated Contest items = 1;
+  PageMeta page = 2;
+}
+
+message GetContestRequest { int64 id = 1; }
+message GetContestResponse {
+  Contest contest = 1;
+  // Current caller registration, consumed by the SSR view only.
+  bool registered = 2;
+}
+
+message ListContestProblemsRequest { int64 contest_id = 1; }
+message ListContestProblemsResponse { repeated ProblemSummary items = 1; }
+
+message GetContestProblemRequest {
+  int64 contest_id = 1;
+  int64 problem_id = 2;
+}
+message GetContestProblemResponse { Problem problem = 1; }
+
+message GetLeaderboardRequest { int64 contest_id = 1; }
+message GetLeaderboardResponse { repeated LeaderboardEntry items = 1; }
+
+message ListParticipantsRequest {
+  int64 contest_id = 1;
+  PageRequest page = 2;
+}
+message ListParticipantsResponse {
+  repeated Participant items = 1;
+  PageMeta page = 2;
+}
+
+message RegisterForContestRequest { int64 contest_id = 1; }
+message RegisterForContestResponse {
+  int64 contest_id = 1;
+  google.protobuf.Timestamp registered_at = 2;
+}

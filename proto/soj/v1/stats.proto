@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "google/protobuf/timestamp.proto";
+
+service StatsService {
+  rpc GetMyStats(GetMyStatsRequest) returns (MyStats);
+  rpc GetClusterStatus(GetClusterStatusRequest) returns (ClusterStatus);
+}
+
+message GetMyStatsRequest {}
+
+message MyStats {
+  optional int32 rank = 1;
+  int64 total_users = 2;
+  int64 submission_count = 3;
+  int64 accepted_count = 4;
+  double acceptance_rate = 5;
+}
+
+message GetClusterStatusRequest {}
+
+message ClusterStatus {
+  reserved 1, 2, 3, 4;
+  reserved "total_nodes", "idle_nodes", "non_idle_nodes", "load";
+  uint32 total_agents = 6;
+  uint32 empty_agents = 7;
+  uint32 no_queue_agents = 8;
+  uint32 queued_agents = 9;
+  google.protobuf.Timestamp updated_at = 5;
+}

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "google/protobuf/struct.proto";
+import "soj/v1/common.proto";
+
+// ProblemInput is the complete create shape used by AdminProblemService.
+message ProblemInput {
+  reserved 1;
+  reserved "id";
+  string title = 2;
+  Difficulty difficulty = 3;
+  repeated string tags = 4;
+  repeated string partitions = 5;
+  bool enabled = 6;
+  string content = 7;
+}
+
+// ProblemPatch preserves omitted fields. A present empty StringList replaces an
+// array with an empty array; a JSON null tag value is represented as clear_tags.
+message StringList {
+  repeated string values = 1;
+}
+
+message Int64List {
+  repeated int64 values = 1;
+}
+
+message ProblemPatch {
+  optional string title = 1;
+  optional Difficulty difficulty = 2;
+  oneof tags_update {
+    StringList tags = 3;
+    google.protobuf.NullValue clear_tags = 4;
+  }
+  StringList partitions = 5;
+  optional bool enabled = 6;
+  optional string content = 7;
+}

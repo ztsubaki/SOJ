@@ -1,0 +1,281 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+message Empty {}
+
+message PageRequest {
+  optional int32 page = 1;
+  optional int32 page_size = 2;
+}
+
+message PageMeta {
+  int32 page = 1;
+  int32 page_size = 2;
+  int64 total = 3;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_USER = 1;
+  ROLE_ADMIN = 2;
+}
+
+enum UserStatus {
+  USER_STATUS_UNSPECIFIED = 0;
+  USER_STATUS_ACTIVE = 1;
+  USER_STATUS_DISABLED = 2;
+}
+
+message User {
+  int64 id = 1;
+  string username = 2;
+  string email = 3;
+  Role role = 4;
+  UserStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  reserved 7;
+  reserved "must_change_password";
+}
+
+enum ContestStatus {
+  CONTEST_STATUS_UNSPECIFIED = 0;
+  reserved 1;
+  reserved "CONTEST_STATUS_DRAFT";
+  CONTEST_STATUS_UPCOMING = 2;
+  CONTEST_STATUS_RUNNING = 3;
+  CONTEST_STATUS_ENDED = 4;
+}
+
+enum ScoringPolicy {
+  SCORING_POLICY_UNSPECIFIED = 0;
+  SCORING_POLICY_BEST = 1;
+  SCORING_POLICY_LATEST = 2;
+}
+
+enum Difficulty {
+  DIFFICULTY_UNSPECIFIED = 0;
+  DIFFICULTY_EASY = 1;
+  DIFFICULTY_MEDIUM = 2;
+  DIFFICULTY_HARD = 3;
+}
+
+message ProblemSummary {
+  int64 id = 1;
+  string title = 2;
+  Difficulty difficulty = 3;
+  repeated string tags = 4;
+  bool runnable = 5;
+}
+
+message ProblemPackage {
+  int64 artifact_id = 1;
+  string sha256 = 2;
+  google.protobuf.Struct manifest = 3;
+  google.protobuf.Timestamp uploaded_at = 4;
+  uint64 size_bytes = 5;
+}
+
+message Problem {
+  int64 id = 1;
+  string title = 2;
+  Difficulty difficulty = 3;
+  repeated string tags = 4;
+  string content = 5;
+  bool enabled = 6;
+  repeated string partitions = 7;
+  ProblemPackage package = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  bool runnable = 11;
+}
+
+message Contest {
+  int64 id = 1;
+  string title = 2;
+  string description = 3;
+  ContestStatus status = 4;
+  google.protobuf.Timestamp starts_at = 5;
+  google.protobuf.Timestamp ends_at = 6;
+  int64 participant_count = 7;
+  optional bool visible = 8;
+  optional ScoringPolicy scoring_policy = 9;
+  repeated ProblemSummary problems = 10;
+}
+
+enum SubmissionKind {
+  SUBMISSION_KIND_UNSPECIFIED = 0;
+  SUBMISSION_KIND_CONTEST = 1;
+  SUBMISSION_KIND_ADMIN_TEST = 2;
+}
+
+enum SubmissionStatus {
+  SUBMISSION_STATUS_UNSPECIFIED = 0;
+  SUBMISSION_STATUS_PENDING = 1;
+  SUBMISSION_STATUS_JUDGING = 2;
+  SUBMISSION_STATUS_ACCEPTED = 3;
+  SUBMISSION_STATUS_WRONG_ANSWER = 4;
+  SUBMISSION_STATUS_COMPILE_ERROR = 5;
+  SUBMISSION_STATUS_RUNTIME_ERROR = 6;
+  SUBMISSION_STATUS_TIME_LIMIT = 7;
+  SUBMISSION_STATUS_MEMORY_LIMIT = 8;
+  SUBMISSION_STATUS_CANCELLED = 9;
+  SUBMISSION_STATUS_SYSTEM_ERROR = 10;
+}
+
+message ArtifactLink {
+  string href = 1;
+}
+
+message SubmissionProblem {
+  int64 id = 1;
+  string title = 2;
+}
+
+message SubmissionSourceMetadata {
+  string filename = 1;
+  uint64 size_bytes = 2;
+  string sha256 = 3;
+  string content_type = 4;
+}
+
+message Submission {
+  int64 id = 1;
+  SubmissionKind kind = 2;
+  optional int64 contest_id = 3;
+  SubmissionProblem problem = 4;
+  SubmissionStatus status = 5;
+  optional string score = 6;
+  optional string message = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  reserved 10, 11;
+  reserved "source", "log";
+}
+
+message LeaderboardProblemScore {
+  int64 problem_id = 1;
+  string score = 2;
+}
+
+message LeaderboardEntry {
+  int32 rank = 1;
+  message LeaderboardUser {
+    int64 id = 1;
+    string username = 2;
+  }
+  LeaderboardUser user = 2;
+  string score = 3;
+  int32 solved = 4;
+  int32 submissions = 5;
+  bool disqualified = 6;
+  google.protobuf.Timestamp last_submission = 7;
+  repeated LeaderboardProblemScore problem_scores = 8;
+}
+
+message Participant {
+  LeaderboardEntry.LeaderboardUser user = 1;
+  google.protobuf.Timestamp registered_at = 2;
+}
+
+enum JobState {
+  reserved 6;
+  reserved "JOB_STATE_CANCEL_REQUESTED";
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_PENDING = 1;
+  JOB_STATE_CLAIMED = 2;
+  JOB_STATE_SUBMITTED = 3;
+  JOB_STATE_RUNNING = 4;
+  JOB_STATE_FINISHING = 5;
+  JOB_STATE_COMPLETED = 7;
+  JOB_STATE_CANCELLED = 8;
+  JOB_STATE_INTERNAL_ERROR = 9;
+}
+
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  VERDICT_ACCEPTED = 1;
+  VERDICT_WRONG_ANSWER = 2;
+  VERDICT_COMPILE_ERROR = 3;
+  VERDICT_RUNTIME_ERROR = 4;
+  VERDICT_TIME_LIMIT = 5;
+  VERDICT_MEMORY_LIMIT = 6;
+}
+
+message JobExecutionSnapshot {
+  int64 package_artifact_id = 1;
+  string package_sha256 = 2;
+  google.protobuf.Struct manifest = 3;
+  repeated string eligible_partitions = 4;
+  optional string assigned_partition = 5;
+}
+
+message Job {
+  reserved 4;
+  reserved "cancel_requested_from";
+  int64 id = 1;
+  int64 submission_id = 2;
+  JobState state = 3;
+  optional string agent_session_id = 5;
+  optional string slurm_job_id = 6;
+  JobExecutionSnapshot execution_snapshot = 7;
+  optional Verdict verdict = 8;
+  optional string score = 9;
+  optional string status_message = 10;
+  reserved 11, 12;
+  reserved "requested_resources", "resource_usage";
+  ArtifactLink result = 13;
+  ArtifactLink log = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp claimed_at = 16;
+  google.protobuf.Timestamp submitted_at = 17;
+  google.protobuf.Timestamp started_at = 18;
+  google.protobuf.Timestamp finished_at = 19;
+  google.protobuf.Timestamp cancel_requested_at = 20;
+}
+
+enum AgentState {
+ AGENT_STATE_UNSPECIFIED = 0;
+ AGENT_STATE_OFFLINE = 2;
+ AGENT_STATE_DRAINING = 3;
+ reserved 1, 4, 5, 6;
+ reserved "AGENT_STATE_DISABLED", "AGENT_STATE_IDLE", "AGENT_STATE_WAITING", "AGENT_STATE_RUNNING";
+ AGENT_STATE_ONLINE = 7;
+ AGENT_STATE_ENDED = 8;
+}
+enum AgentWorkload {
+ AGENT_WORKLOAD_UNSPECIFIED = 0;
+ AGENT_WORKLOAD_EMPTY = 1;
+ AGENT_WORKLOAD_NO_QUEUE = 2;
+ AGENT_WORKLOAD_QUEUED = 3;
+}
+
+message AgentSession {
+  string id = 1;
+  string partition = 2;
+  AgentState state = 3;
+  reserved 4, 5;
+  reserved "total_nodes", "idle_nodes";
+  AgentWorkload workload = 11;
+  uint32 waiting_job_count = 12;
+  uint32 running_job_count = 13;
+  google.protobuf.Timestamp last_heartbeat_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+  uint32 active_job_count = 8;
+  google.protobuf.Timestamp drain_requested_at = 9;
+  google.protobuf.Timestamp ended_at = 10;
+}
+
+enum SlurmTerminalState {
+  SLURM_TERMINAL_STATE_UNSPECIFIED = 0;
+  SLURM_TERMINAL_STATE_COMPLETED = 1;
+  SLURM_TERMINAL_STATE_FAILED = 2;
+  SLURM_TERMINAL_STATE_TIMEOUT = 3;
+  SLURM_TERMINAL_STATE_OUT_OF_MEMORY = 4;
+  SLURM_TERMINAL_STATE_CANCELLED = 5;
+}

@@ -1,0 +1,33 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+  font-family:
+    var(--font-sans),      /* Geist Sans：英文、数字 */
+    "PingFang SC",         /* macOS / iOS 苹方 */
+    "Hiragino Sans GB",    /* 部分 macOS 旧版本 */
+    "Microsoft YaHei",     /* Windows 微软雅黑 */
+    "Noto Sans SC",        /* 本地已安装字体兜底 */
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+}

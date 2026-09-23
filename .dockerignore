@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+services/api/data
+services/judge

@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package soj.judge.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/judge/v1;judgev1";
+
+import "google/protobuf/timestamp.proto";
+import "soj/judge/v1/job.proto";
+import "soj/v1/common.proto";
+
+service JudgeControlService {
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+  rpc ReportAgentStatus(ReportAgentStatusRequest) returns (ReportAgentStatusResponse);
+  rpc ClaimJobs(ClaimJobsRequest) returns (ClaimJobsResponse);
+  rpc ReportJob(ReportJobRequest) returns (ReportJobResponse);
+  rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc FailJob(FailJobRequest) returns (FailJobResponse);
+}
+
+message RegisterAgentRequest {
+  string agent_session_id = 1;
+  string partition = 2;
+  reserved 3;
+  reserved "total_nodes";
+}
+message RegisterAgentResponse {
+  reserved 3;
+  reserved "takeover_threshold_ms";
+  AgentSessionView session = 1;
+  uint64 heartbeat_interval_ms = 2;
+  uint64 offline_threshold_ms = 4;
+}
+
+message ReportAgentStatusRequest {
+  string agent_session_id = 1;
+  reserved 2, 3;
+  reserved "idle_nodes", "observed_at";
+}
+message ReportAgentStatusResponse {
+  soj.v1.AgentState state = 1;
+  reserved 2;
+  reserved "commands";
+  repeated int64 cancel_job_ids = 4;
+  google.protobuf.Timestamp server_time = 3;
+}
+
+message ClaimJobsRequest { string agent_session_id = 1; }
+message ClaimJobsResponse {
+  JobAssignment assignment = 1;
+  soj.v1.AgentState state = 2;
+  // Counts are a best-effort snapshot for Agent diagnostics.  They count only
+  // jobs that are still pending, so a claimed assignment is not included.
+  uint32 pending_job_count = 3;
+  uint32 eligible_pending_job_count = 4;
+}
+
+message ReportJobRequest {
+  string agent_session_id = 1;
+  int64 job_id = 2;
+  soj.v1.JobState state = 3;
+  optional string slurm_job_id = 4;
+  google.protobuf.Timestamp observed_at = 5;
+}
+message ReportJobResponse {
+  soj.v1.JobState state = 1;
+  optional string slurm_job_id = 2;
+  reserved 3;
+  reserved "terminal";
+}
+
+message CompleteJobRequest {
+  reserved 3, 4, 5;
+  reserved "verdict", "score", "status_message";
+  string agent_session_id = 1;
+  int64 job_id = 2;
+  soj.v1.SlurmTerminalState slurm_terminal_state = 6;
+  optional int64 result_artifact_id = 7;
+  optional int64 log_artifact_id = 8;
+  reserved 9;
+  reserved "resource_usage";
+  StructuredResult result = 11;
+  google.protobuf.Timestamp finished_at = 10;
+}
+message StructuredResult {
+ soj.v1.Verdict verdict = 1;
+ string score = 2;
+ optional string message = 3;
+}
+message CompleteJobResponse {
+ soj.v1.JobState state = 1;
+ reserved 2, 3, 4;
+ reserved "verdict", "score", "finished_at";
+}
+
+message CancelJobRequest {
+  string agent_session_id = 1;
+  int64 job_id = 2;
+  google.protobuf.Timestamp finished_at = 3;
+}
+message CancelJobResponse {
+  soj.v1.JobState state = 1;
+  reserved 2;
+  reserved "finished_at";
+}
+
+message FailJobRequest {
+  string agent_session_id = 1;
+  int64 job_id = 2;
+  string status_message = 3;
+  google.protobuf.Timestamp finished_at = 4;
+}
+message FailJobResponse {
+  soj.v1.JobState state = 1;
+  reserved 2;
+  reserved "finished_at";
+}

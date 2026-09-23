@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://soj.dev/schema/result/v1/result.schema.json",
+  "title": "SOJ judge package result v1",
+  "description": "Authoritative result contract for ./output/result.json, atomically published by the trusted package finalizer relative to work/<job-id>. jobId must match the current job. Slurm TIMEOUT and OUT_OF_MEMORY do not use this file; resource telemetry is not part of the result contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "jobId", "verdict", "score"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "jobId": { "type": "integer", "minimum": 1 },
+    "verdict": { "enum": ["accepted", "wrong_answer", "compile_error", "runtime_error"] },
+    "score": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "message": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[ -~]+$" }
+  }
+}

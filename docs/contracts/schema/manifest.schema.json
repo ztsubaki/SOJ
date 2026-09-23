@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://soj.dev/schema/manifest/v1/manifest.schema.json",
+  "title": "SOJ problem package manifest v1",
+  "description": "Authoritative manifest contract for package/manifest.json. The package root must also contain judge.sbatch; execution configuration belongs to that trusted batch script, not this JSON.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "problemId"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "problemId": { "$ref": "#/$defs/problemId" }
+  },
+  "$defs": {
+    "problemId": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  }
+}

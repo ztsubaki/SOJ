@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "soj/v1/common.proto";
+
+service SubmissionService {
+  rpc ListMySubmissions(ListMySubmissionsRequest) returns (ListMySubmissionsResponse);
+  rpc GetMySubmission(GetMySubmissionRequest) returns (GetMySubmissionResponse);
+}
+
+message ListMySubmissionsRequest {
+  optional int64 contest_id = 1;
+  optional int64 problem_id = 2;
+  optional SubmissionStatus status = 3;
+  PageRequest page = 4;
+}
+message ListMySubmissionsResponse {
+  repeated Submission items = 1;
+  PageMeta page = 2;
+}
+
+message GetMySubmissionRequest { int64 id = 1; }
+message GetMySubmissionResponse {
+  Submission submission = 1;
+  SubmissionSourceMetadata source_metadata = 2;
+  bool has_current_log = 3;
+}

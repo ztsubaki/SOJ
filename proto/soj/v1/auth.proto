@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "google/protobuf/timestamp.proto";
+import "soj/v1/common.proto";
+
+service AuthService {
+  rpc SendRegistrationEmailVerification(SendRegistrationEmailVerificationRequest) returns (SendRegistrationEmailVerificationResponse);
+  rpc Register(RegisterRequest) returns (AuthSessionResponse);
+  rpc Login(LoginRequest) returns (AuthSessionResponse);
+  rpc RefreshSession(RefreshSessionRequest) returns (RefreshSessionResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (Empty);
+  rpc Logout(LogoutRequest) returns (Empty);
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
+}
+
+message Credentials {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message RegisterRequest {
+  Credentials credentials = 1;
+  string email_verification_code = 2;
+}
+
+message SendRegistrationEmailVerificationRequest {
+  string username = 1;
+  string email = 2;
+}
+
+message SendRegistrationEmailVerificationResponse {
+  uint32 resend_after_seconds = 1;
+  bool username_available = 2;
+  bool email_available = 3;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message AuthSessionResponse {
+  User user = 1;
+  // BFF-only: never serialize this field to Browser JSON.
+  string session_token = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  reserved 4;
+  reserved "is_root";
+  reserved 5;
+  reserved "must_change_password";
+}
+
+message RefreshSessionRequest {}
+
+message RefreshSessionResponse {
+  string session_token = 2;
+  google.protobuf.Timestamp expires_at = 1;
+}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+
+message LogoutRequest {}
+
+message GetCurrentUserRequest {}
+
+message GetCurrentUserResponse {
+  User user = 1;
+  reserved 2;
+  reserved "is_root";
+  google.protobuf.Timestamp expires_at = 4;
+  reserved 3;
+  reserved "must_change_password";
+}

@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+package soj.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/v1;sojv1";
+
+import "google/protobuf/timestamp.proto";
+import "soj/v1/common.proto";
+import "soj/v1/problems.proto";
+import "soj/v1/submissions.proto";
+
+service AdminProblemService {
+  rpc ListProblems(AdminListProblemsRequest) returns (AdminListProblemsResponse);
+  rpc CreateProblem(CreateProblemRequest) returns (Problem);
+  rpc GetProblem(AdminGetProblemRequest) returns (Problem);
+  rpc UpdateProblem(UpdateProblemRequest) returns (Problem);
+  rpc DeleteProblem(DeleteProblemRequest) returns (Empty);
+}
+
+service AdminContestService {
+  rpc ListContests(AdminListContestsRequest) returns (AdminListContestsResponse);
+  rpc CreateContest(CreateContestRequest) returns (Contest);
+  rpc GetContest(AdminGetContestRequest) returns (Contest);
+  rpc UpdateContest(UpdateContestRequest) returns (Contest);
+  rpc DeleteContest(DeleteContestRequest) returns (Empty);
+  rpc ListRankings(AdminListRankingsRequest) returns (AdminListRankingsResponse);
+  rpc DisqualifyParticipant(DisqualifyParticipantRequest) returns (Empty);
+  rpc RestoreParticipant(RestoreParticipantRequest) returns (Empty);
+}
+
+service AdminSubmissionService {
+  rpc ListSubmissions(AdminListSubmissionsRequest) returns (AdminListSubmissionsResponse);
+  rpc GetSubmission(AdminGetSubmissionRequest) returns (AdminGetSubmissionResponse);
+  rpc ListSubmissionJobs(ListSubmissionJobsRequest) returns (ListSubmissionJobsResponse);
+  rpc RejudgeSubmission(RejudgeSubmissionRequest) returns (RejudgeSubmissionResponse);
+  rpc CancelSubmission(CancelSubmissionRequest) returns (GetMySubmissionResponse);
+}
+
+service AdminUserService {
+  rpc ListUsers(AdminListUsersRequest) returns (AdminListUsersResponse);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc GetUser(AdminGetUserRequest) returns (User);
+  rpc UpdateUser(UpdateUserRequest) returns (User);
+  rpc DeleteUser(DeleteUserRequest) returns (Empty);
+  rpc ResetUserPassword(AdminResetUserPasswordRequest) returns (AdminResetUserPasswordResponse);
+}
+
+service AdminSystemService {
+  rpc GetStats(GetAdminStatsRequest) returns (AdminStats);
+  rpc GetStatus(GetSystemStatusRequest) returns (SystemStatus);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc DrainAgent(DrainAgentRequest) returns (AgentSession);
+}
+
+message AdminListProblemsRequest {
+  optional string query = 1;
+  optional bool enabled = 2;
+  PageRequest page = 3;
+}
+message AdminListProblemsResponse {
+  repeated Problem items = 1;
+  PageMeta page = 2;
+}
+message CreateProblemRequest { ProblemInput problem = 1; }
+message AdminGetProblemRequest { int64 id = 1; }
+message UpdateProblemRequest {
+  int64 id = 1;
+  ProblemPatch patch = 2;
+}
+message DeleteProblemRequest { int64 id = 1; }
+message ContestInput {
+  reserved 1;
+  reserved "id";
+  string title = 2;
+  google.protobuf.Timestamp starts_at = 3;
+  google.protobuf.Timestamp ends_at = 4;
+  string description = 5;
+  repeated int64 problems = 6;
+  bool visible = 7;
+  ScoringPolicy scoring_policy = 8;
+}
+message AdminListContestsRequest {
+  optional string query = 1;
+  optional ContestStatus status = 2;
+  PageRequest page = 3;
+}
+message AdminListContestsResponse {
+  repeated Contest items = 1;
+  PageMeta page = 2;
+}
+message CreateContestRequest { ContestInput contest = 1; }
+message AdminGetContestRequest { int64 id = 1; }
+message UpdateContestRequest {
+  int64 id = 1;
+  optional string title = 2;
+  google.protobuf.Timestamp starts_at = 3;
+  google.protobuf.Timestamp ends_at = 4;
+  optional string description = 5;
+  Int64List problems = 6;
+  optional bool visible = 7;
+  optional ScoringPolicy scoring_policy = 8;
+}
+message DeleteContestRequest { int64 id = 1; }
+message AdminListRankingsRequest {
+  int64 contest_id = 1;
+  PageRequest page = 2;
+}
+message AdminListRankingsResponse {
+  repeated LeaderboardEntry items = 1;
+  PageMeta page = 2;
+}
+message DisqualifyParticipantRequest {
+  int64 contest_id = 1;
+  int64 user_id = 2;
+}
+message RestoreParticipantRequest {
+  int64 contest_id = 1;
+  int64 user_id = 2;
+}
+
+message AdminListSubmissionsRequest {
+  optional string query = 1;
+  optional Verdict verdict = 2;
+  optional string user = 3;
+  optional string problem = 4;
+  optional SubmissionKind kind = 5;
+  PageRequest page = 6;
+}
+message AdminListSubmissionsResponse {
+  repeated Submission items = 1;
+  PageMeta page = 2;
+}
+message AdminGetSubmissionRequest { int64 id = 1; }
+message AdminGetSubmissionResponse {
+  Submission submission = 1;
+  SubmissionSourceMetadata source_metadata = 2;
+  optional int64 current_job_id = 3;
+  bool has_current_log = 4;
+}
+message ListSubmissionJobsRequest {
+  int64 submission_id = 1;
+  PageRequest page = 2;
+}
+message ListSubmissionJobsResponse {
+  repeated Job items = 1;
+  PageMeta page = 2;
+}
+message RejudgeSubmissionRequest { int64 submission_id = 1; }
+message RejudgeSubmissionResponse {
+  int64 submission_id = 1;
+  SubmissionStatus status = 2;
+  int64 job_id = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+message CancelSubmissionRequest { int64 submission_id = 1; }
+
+message AdminListUsersRequest {
+  optional string query = 1;
+  optional UserStatus status = 2;
+  optional Role role = 3;
+  PageRequest page = 4;
+}
+message AdminListUsersResponse {
+  repeated User items = 1;
+  PageMeta page = 2;
+}
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  reserved 3, 4;
+  reserved "role", "password";
+}
+message CreateUserResponse {
+  User user = 1;
+  reserved 2;
+  reserved "temporary_password";
+}
+message AdminGetUserRequest { int64 id = 1; }
+message AdminResetUserPasswordRequest { int64 id = 1; }
+message AdminResetUserPasswordResponse { string password = 1; }
+message UpdateUserRequest {
+  int64 id = 1;
+  optional string email = 2;
+  optional UserStatus status = 3;
+  reserved 4;
+  reserved "role";
+}
+message DeleteUserRequest { int64 id = 1; }
+message AgentWorkloadCounts {
+  uint32 empty = 1;
+  uint32 no_queue = 2;
+  uint32 queued = 3;
+}
+
+message AdminStats {
+  int64 total_users = 1;
+  int64 today_submissions = 2;
+  int64 pending_submissions = 3;
+  reserved 4;
+  reserved "system_load";
+  AgentWorkloadCounts agent_workload = 5;
+}
+message GetAdminStatsRequest {}
+message GetSystemStatusRequest {}
+message SystemStatus {
+  reserved 1, 2;
+  reserved "database", "artifact_backend";
+  int64 active_agents = 3;
+  int64 pending_jobs = 4;
+  int64 running_jobs = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  AgentWorkloadCounts agent_workload = 7;
+}
+message ListAgentsRequest {
+  optional string partition = 1;
+  optional AgentState state = 2;
+  PageRequest page = 3;
+}
+message ListAgentsResponse {
+  repeated AgentSession items = 1;
+  PageMeta page = 2;
+}
+message DrainAgentRequest { string id = 1; }

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package soj.judge.v1;
+
+option go_package = "github.com/ztsubaki/soj/proto/soj/judge/v1;judgev1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "soj/v1/common.proto";
+
+message ArtifactReference {
+  int64 artifact_id = 1;
+  string sha256 = 2;
+  uint64 size_bytes = 3;
+  reserved 4, 5;
+  reserved "download_url", "expires_at";
+}
+
+message JobAssignment {
+  int64 job_id = 1;
+  int64 submission_id = 2;
+  string agent_session_id = 3;
+  reserved 4;
+  reserved "eligible_partitions";
+  string assigned_partition = 5;
+  ArtifactReference package = 6;
+  ArtifactReference submission = 7;
+  google.protobuf.Struct manifest = 8;
+  string submission_filename = 9;
+  string submission_content_type = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message AgentSessionView {
+  string id = 1;
+  string partition = 2;
+  soj.v1.AgentState state = 3;
+  reserved 4, 5;
+  reserved "total_nodes", "idle_nodes";
+  google.protobuf.Timestamp last_heartbeat_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
