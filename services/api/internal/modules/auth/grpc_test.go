@@ -15,6 +15,12 @@ func TestAuthErrorMapsEmailVerificationFailuresToFailedPrecondition(t *testing.T
 	}
 }
 
+func TestAuthErrorMapsEmailDeliveryFailureToUnavailable(t *testing.T) {
+	if got := status.Code(authError(ErrEmailVerificationDelivery)); got != codes.Unavailable {
+		t.Fatalf("authError(delivery) = %v, want %v", got, codes.Unavailable)
+	}
+}
+
 func TestAuthErrorMapsRegistrationEmailDomainToInvalidArgument(t *testing.T) {
 	err := authError(ErrRegistrationEmailDomain)
 	if got := status.Code(err); got != codes.InvalidArgument {

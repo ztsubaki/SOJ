@@ -62,6 +62,12 @@ docker run --rm \
   soj
 ```
 
+要通过 SMTP 发送注册验证码，额外设置 `SMTP_HOST`、`SMTP_FROM`，并在需要认证时同时
+设置 `SMTP_USERNAME` 与 `SMTP_PASSWORD`。`SMTP_PORT` 默认为 `587`，
+`SMTP_TLS_MODE` 默认为 `starttls`；使用隐式 TLS（通常为 465 端口）时设为 `tls`。
+无论是否配置 `SMTP_HOST`，Control Plane 都会在服务端日志输出验证码；未配置时仅跳过
+SMTP 投递，适合本地开发。
+
 Set `PLATFORM_NAME` to change the name shown in Web and Admin; it defaults to
 `SOJ` and is read when the container handles a request, so the same image can
 be deployed with a different name.

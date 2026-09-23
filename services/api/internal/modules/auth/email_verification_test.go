@@ -1,16 +1,33 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 )
 
+type recordingRegistrationEmailSender struct {
+	recipients []string
+	codes      []string
+	err        error
+}
+
+func (s *recordingRegistrationEmailSender) SendRegistrationEmailVerification(_ context.Context, recipient, code string) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.recipients = append(s.recipients, recipient)
+	s.codes = append(s.codes, code)
+	return nil
+}
+
 func TestRegistrationEmailVerification(t *testing.T) {
-	service := &Service{emailVerifications: make(map[string]emailVerification)}
+	sender := &recordingRegistrationEmailSender{}
+	service := &Service{emailSender: sender, emailVerifications: make(map[string]emailVerification)}
 	const email = "runner@example.invalid"
 
-	resendAfter, err := service.issueRegistrationEmailVerification(email)
+	resendAfter, err := service.issueRegistrationEmailVerification(context.Background(), email)
 	if err != nil {
 		t.Fatalf("send verification: %v", err)
 	}
@@ -24,7 +41,10 @@ func TestRegistrationEmailVerification(t *testing.T) {
 	if !verification.expiresAt.After(time.Now()) {
 		t.Fatal("verification should not be expired")
 	}
-	if _, err := service.issueRegistrationEmailVerification(email); !errors.Is(err, ErrEmailVerificationRateLimited) {
+	if len(sender.codes) != 1 || sender.recipients[0] != email || sender.codes[0] != verification.code {
+		t.Fatalf("delivered verification = (%v, %v), want recipient %q and issued code", sender.recipients, sender.codes, email)
+	}
+	if _, err := service.issueRegistrationEmailVerification(context.Background(), email); !errors.Is(err, ErrEmailVerificationRateLimited) {
 		t.Fatalf("send during cooldown = %v, want rate limited", err)
 	}
 	if err := service.validRegistrationEmailVerification(email, "000000"); !errors.Is(err, ErrEmailVerificationInvalid) {
@@ -42,11 +62,27 @@ func TestRegistrationEmailVerification(t *testing.T) {
 	if service.emailVerifications[email].code != "" {
 		t.Fatal("consumed code was retained")
 	}
-	if _, err := service.issueRegistrationEmailVerification(email); !errors.Is(err, ErrEmailVerificationRateLimited) {
+	if _, err := service.issueRegistrationEmailVerification(context.Background(), email); !errors.Is(err, ErrEmailVerificationRateLimited) {
 		t.Fatalf("send after consumption = %v, want rate limited", err)
 	}
 	if err := service.validRegistrationEmailVerification(email, verification.code); !errors.Is(err, ErrEmailVerificationRequired) {
 		t.Fatalf("consumed code = %v, want required", err)
+	}
+}
+
+func TestRegistrationEmailVerificationIsNotIssuedWhenDeliveryFails(t *testing.T) {
+	sender := &recordingRegistrationEmailSender{err: errors.New("SMTP unavailable")}
+	service := &Service{emailSender: sender, emailVerifications: make(map[string]emailVerification)}
+	const email = "runner@example.invalid"
+	if _, err := service.issueRegistrationEmailVerification(context.Background(), email); !errors.Is(err, ErrEmailVerificationDelivery) {
+		t.Fatalf("delivery failure = %v, want ErrEmailVerificationDelivery", err)
+	}
+	if _, exists := service.emailVerifications[email]; exists {
+		t.Fatal("failed delivery retained a usable verification code")
+	}
+	sender.err = nil
+	if _, err := service.issueRegistrationEmailVerification(context.Background(), email); err != nil {
+		t.Fatalf("retry after delivery failure: %v", err)
 	}
 }
 

@@ -126,7 +126,7 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 
 | HTTP | Auth | 请求 | 成功响应 | 规则 |
 |---|---|---|---|---|
-| `POST /api/v1/auth/email-verification` | public | `{username,email}` | `200 {usernameAvailable:boolean,emailAvailable:boolean,resendAfterSeconds:integer}` | 请求注册邮箱验证码。仅Web BFF提供；先返回用户名与邮箱可用性，任一为false时不生成验证码且`resendAfterSeconds`为0；白名单未允许的邮箱域名为`4002`；同一规范化邮箱60秒内重发为`4290`，验证码不出现在响应中。 |
+| `POST /api/v1/auth/email-verification` | public | `{username,email}` | `200 {usernameAvailable:boolean,emailAvailable:boolean,resendAfterSeconds:integer}` | 请求注册邮箱验证码。仅Web BFF提供；先返回用户名与邮箱可用性，任一为false时不生成验证码且`resendAfterSeconds`为0；白名单未允许的邮箱域名为`4002`；同一规范化邮箱60秒内重发为`4290`；SMTP 暂时不可用为`5030`，此时不保存验证码或进入冷却；验证码不出现在响应中。 |
 | `POST /api/v1/auth/register` | public | `{username,email,password,emailVerificationCode}` | `201 AuthSession` | 邮箱验证码必须为当前、未过期的六码数字码；验证码错误、过期或已消费为`4092`。白名单未允许的邮箱域名为`4002`。创建user和独立session，无管理员初始化前置条件，不接受role。username/email冲突为`4091`。 |
 | `POST /api/v1/auth/login` | public | `{username,password}` | `200 AuthSession` | 成功设置Cookie；无效凭据或disabled为`4010`。 |
 | `POST /api/v1/auth/refresh` | user | 空body | `200 {expiresAt:Timestamp}` | 成功替换Cookie；已过期或撤销为`4010`。TTL与轮换规则见`api.md`。 |

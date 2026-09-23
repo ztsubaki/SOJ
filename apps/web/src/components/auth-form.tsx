@@ -120,7 +120,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       }
       const { resendAfterSeconds } = result;
       setResendAfter(resendAfterSeconds);
-      show("验证码已生成，请查看 Control Plane 服务端日志", "info");
+      show("验证码已发送，请查收邮箱", "info");
     } catch (reason) {
       setError(authErrorMessage(reason, "register"));
     } finally {

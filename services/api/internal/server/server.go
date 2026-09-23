@@ -106,7 +106,19 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	authService, err := auth.NewPostgresService(ctx, databasePool, artifactRoot, sessionTTL, registrationEmailDomains)
+	emailSender, err := auth.NewRegistrationEmailSender(auth.SMTPConfig{
+		Host:         serverconfig.String("SMTP_HOST", ""),
+		Port:         serverconfig.String("SMTP_PORT", "587"),
+		Username:     serverconfig.String("SMTP_USERNAME", ""),
+		Password:     os.Getenv("SMTP_PASSWORD"),
+		From:         serverconfig.String("SMTP_FROM", ""),
+		TLSMode:      serverconfig.String("SMTP_TLS_MODE", "starttls"),
+		PlatformName: serverconfig.String("PLATFORM_NAME", "SOJ"),
+	})
+	if err != nil {
+		return err
+	}
+	authService, err := auth.NewPostgresServiceWithEmailSender(ctx, databasePool, artifactRoot, sessionTTL, registrationEmailDomains, emailSender)
 	if err != nil {
 		return err
 	}

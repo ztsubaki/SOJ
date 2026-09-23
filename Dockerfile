@@ -35,7 +35,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/soj-api ./cmd/cont
 # deliberately remain external services.
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends dumb-init openssl \
+    && apt-get install --yes --no-install-recommends ca-certificates dumb-init openssl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

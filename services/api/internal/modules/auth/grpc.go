@@ -147,6 +147,8 @@ func authError(err error) error {
 		return status.Error(codes.AlreadyExists, "username or email already exists")
 	case errors.Is(err, ErrEmailVerificationRateLimited):
 		return status.Error(codes.ResourceExhausted, "email verification is rate limited")
+	case errors.Is(err, ErrEmailVerificationDelivery):
+		return status.Error(codes.Unavailable, "email verification delivery is unavailable")
 	case errors.Is(err, ErrEmailVerificationRequired), errors.Is(err, ErrEmailVerificationExpired), errors.Is(err, ErrEmailVerificationInvalid):
 		return status.Error(codes.FailedPrecondition, "email verification is invalid")
 	case errors.Is(err, ErrRegistrationEmailDomain):

@@ -35,6 +35,7 @@ var (
 	ErrEmailVerificationExpired     = errors.New("email verification has expired")
 	ErrEmailVerificationInvalid     = errors.New("email verification is invalid")
 	ErrEmailVerificationRateLimited = errors.New("email verification is rate limited")
+	ErrEmailVerificationDelivery    = errors.New("email verification delivery failed")
 )
 
 const (
@@ -59,21 +60,33 @@ type User struct {
 
 // Service owns user credentials and server-side sessions.
 type Service struct {
-	ttl                      time.Duration
-	pool                     *pgxpool.Pool
-	artifactRoot             string
-	registrationEmailDomains map[string]struct{}
-	verificationMu           sync.Mutex
-	emailVerifications       map[string]emailVerification
+	ttl                         time.Duration
+	pool                        *pgxpool.Pool
+	artifactRoot                string
+	registrationEmailDomains    map[string]struct{}
+	emailSender                 RegistrationEmailSender
+	verificationMu              sync.Mutex
+	emailVerifications          map[string]emailVerification
+	emailVerificationDeliveries map[string]struct{}
 }
 
 // NewPostgresService uses PostgreSQL for users and server-side sessions.
 func NewPostgresService(ctx context.Context, pool *pgxpool.Pool, artifactRoot string, ttl time.Duration, registrationEmailDomains []string) (*Service, error) {
+	return NewPostgresServiceWithEmailSender(ctx, pool, artifactRoot, ttl, registrationEmailDomains, registrationEmailLogger{})
+}
+
+// NewPostgresServiceWithEmailSender uses the provided sender for registration
+// verification messages. It exists so the server can supply SMTP while tests
+// and local development retain the logger sender.
+func NewPostgresServiceWithEmailSender(ctx context.Context, pool *pgxpool.Pool, artifactRoot string, ttl time.Duration, registrationEmailDomains []string, emailSender RegistrationEmailSender) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("database is required")
 	}
 	if ttl <= 0 {
 		ttl = 72 * time.Hour
+	}
+	if emailSender == nil {
+		emailSender = registrationEmailLogger{}
 	}
 	allowedDomains := make(map[string]struct{})
 	for _, domain := range registrationEmailDomains {
@@ -81,14 +94,15 @@ func NewPostgresService(ctx context.Context, pool *pgxpool.Pool, artifactRoot st
 	}
 	return &Service{
 		pool: pool, artifactRoot: filepath.Clean(artifactRoot), ttl: ttl,
-		registrationEmailDomains: allowedDomains,
-		emailVerifications:       make(map[string]emailVerification),
+		registrationEmailDomains:    allowedDomains,
+		emailSender:                 emailSender,
+		emailVerifications:          make(map[string]emailVerification),
+		emailVerificationDeliveries: make(map[string]struct{}),
 	}, nil
 }
 
 // SendRegistrationEmailVerification checks registration identifiers before
-// creating a short-lived code. The code remains process-local until a real
-// mail delivery system is added.
+// sending a short-lived code. The code becomes usable only after delivery.
 func (s *Service) SendRegistrationEmailVerification(ctx context.Context, username, email string) (usernameAvailable, emailAvailable bool, resendAfterSeconds uint32, err error) {
 	username = normalizeUsername(username)
 	email = normalizeEmail(email)
@@ -102,7 +116,7 @@ func (s *Service) SendRegistrationEmailVerification(ctx context.Context, usernam
 	if err != nil || !usernameAvailable || !emailAvailable {
 		return usernameAvailable, emailAvailable, 0, err
 	}
-	resendAfterSeconds, err = s.issueRegistrationEmailVerification(email)
+	resendAfterSeconds, err = s.issueRegistrationEmailVerification(ctx, email)
 	return true, true, resendAfterSeconds, err
 }
 
@@ -115,30 +129,53 @@ func (s *Service) registrationIdentifiersAvailable(ctx context.Context, username
 
 }
 
-func (s *Service) issueRegistrationEmailVerification(email string) (uint32, error) {
+func (s *Service) issueRegistrationEmailVerification(ctx context.Context, email string) (uint32, error) {
 	email = normalizeEmail(email)
 	if !validEmail(email) {
 		return 0, ErrInvalidRegistration
 	}
 	now := time.Now()
 	s.verificationMu.Lock()
-	defer s.verificationMu.Unlock()
 	for key, verification := range s.emailVerifications {
 		if !verification.expiresAt.After(now) {
 			delete(s.emailVerifications, key)
 		}
 	}
 	if verification, ok := s.emailVerifications[email]; ok && now.Before(verification.sentAt.Add(registrationEmailVerificationCooldown)) {
+		s.verificationMu.Unlock()
 		return 0, ErrEmailVerificationRateLimited
+	}
+	if s.emailVerificationDeliveries == nil {
+		s.emailVerificationDeliveries = make(map[string]struct{})
+	}
+	if _, delivering := s.emailVerificationDeliveries[email]; delivering {
+		s.verificationMu.Unlock()
+		return 0, ErrEmailVerificationDelivery
 	}
 	code, err := randomEmailVerificationCode()
 	if err != nil {
+		s.verificationMu.Unlock()
 		return 0, err
 	}
+	s.emailVerificationDeliveries[email] = struct{}{}
+	s.verificationMu.Unlock()
+	log.Printf("registration email verification code email=%s code=%s", email, code)
+
+	if err := s.emailSender.SendRegistrationEmailVerification(ctx, email, code); err != nil {
+		s.verificationMu.Lock()
+		delete(s.emailVerificationDeliveries, email)
+		s.verificationMu.Unlock()
+		log.Printf("registration email verification delivery failed: %v", err)
+		return 0, fmt.Errorf("%w: %v", ErrEmailVerificationDelivery, err)
+	}
+
+	s.verificationMu.Lock()
+	delete(s.emailVerificationDeliveries, email)
+	now = time.Now()
 	s.emailVerifications[email] = emailVerification{
 		code: code, sentAt: now, expiresAt: now.Add(registrationEmailVerificationTTL),
 	}
-	log.Printf("registration email verification code email=%s code=%s", email, code)
+	s.verificationMu.Unlock()
 	return uint32(registrationEmailVerificationCooldown / time.Second), nil
 }
 

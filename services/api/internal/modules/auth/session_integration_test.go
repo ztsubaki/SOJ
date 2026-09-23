@@ -40,7 +40,7 @@ func TestSessionRotationIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	const alternateEmail = "rotation-secondary@example.invalid"
-	if _, err := service.issueRegistrationEmailVerification(alternateEmail); err != nil {
+	if _, err := service.issueRegistrationEmailVerification(ctx, alternateEmail); err != nil {
 		t.Fatal(err)
 	}
 	secondaryCode := service.emailVerifications[alternateEmail].code
