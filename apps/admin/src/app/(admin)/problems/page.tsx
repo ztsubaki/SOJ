@@ -1,7 +1,6 @@
 "use client";
 import Panel from "@/components/ui/Panel";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import Badge from "@/components/ui/badge/Badge";
 import {
   Table,
@@ -12,20 +11,12 @@ import {
 } from "@/components/ui/table";
 import type { ProblemDetail } from "@/lib/admin-types";
 import { difficultyColor } from "@/lib/presentation";
-import { allPages } from "@/lib/pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
+import Pagination from "@/components/ui/Pagination";
 import { ToastMessage } from "@/context/ToastContext";
 
 export default function ProblemsPage() {
-  const [problems, setProblems] = useState<ProblemDetail[]>([]);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    void allPages<ProblemDetail>("/admin/problems")
-      .then(setProblems)
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : "无法读取题目列表"),
-      );
-  }, []);
+  const { items: problems, page, pageSize, total, loading, error, setPage } = usePaginatedQuery<ProblemDetail>("/admin/problems");
 
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
@@ -156,6 +147,7 @@ export default function ProblemsPage() {
             </Table>
             <ToastMessage message={error} />
           </div>
+          <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
         </Panel>
       </div>
     </div>

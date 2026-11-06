@@ -77,10 +77,12 @@ export interface GetContestProblemResponse {
 
 export interface GetLeaderboardRequest {
   contestId?: number | undefined;
+  page?: PageRequest | undefined;
 }
 
 export interface GetLeaderboardResponse {
   items?: LeaderboardEntry[] | undefined;
+  page?: PageMeta | undefined;
 }
 
 export interface ListParticipantsRequest {
@@ -673,13 +675,16 @@ export const GetContestProblemResponse: MessageFns<GetContestProblemResponse> = 
 };
 
 function createBaseGetLeaderboardRequest(): GetLeaderboardRequest {
-  return { contestId: 0 };
+  return { contestId: 0, page: undefined };
 }
 
 export const GetLeaderboardRequest: MessageFns<GetLeaderboardRequest> = {
   encode(message: GetLeaderboardRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.contestId !== undefined && message.contestId !== 0) {
       writer.uint32(8).int64(message.contestId);
+    }
+    if (message.page !== undefined) {
+      PageRequest.encode(message.page, writer.uint32(18).fork()).join();
     }
     return writer;
   },
@@ -699,6 +704,14 @@ export const GetLeaderboardRequest: MessageFns<GetLeaderboardRequest> = {
           message.contestId = longToNumber(reader.int64());
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.page = PageRequest.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -709,13 +722,19 @@ export const GetLeaderboardRequest: MessageFns<GetLeaderboardRequest> = {
   },
 
   fromJSON(object: any): GetLeaderboardRequest {
-    return { contestId: isSet(object.contestId) ? globalThis.Number(object.contestId) : 0 };
+    return {
+      contestId: isSet(object.contestId) ? globalThis.Number(object.contestId) : 0,
+      page: isSet(object.page) ? PageRequest.fromJSON(object.page) : undefined,
+    };
   },
 
   toJSON(message: GetLeaderboardRequest): unknown {
     const obj: any = {};
     if (message.contestId !== undefined && message.contestId !== 0) {
       obj.contestId = Math.round(message.contestId);
+    }
+    if (message.page !== undefined) {
+      obj.page = PageRequest.toJSON(message.page);
     }
     return obj;
   },
@@ -726,12 +745,15 @@ export const GetLeaderboardRequest: MessageFns<GetLeaderboardRequest> = {
   fromPartial<I extends Exact<DeepPartial<GetLeaderboardRequest>, I>>(object: I): GetLeaderboardRequest {
     const message = createBaseGetLeaderboardRequest();
     message.contestId = object.contestId ?? 0;
+    message.page = (object.page !== undefined && object.page !== null)
+      ? PageRequest.fromPartial(object.page)
+      : undefined;
     return message;
   },
 };
 
 function createBaseGetLeaderboardResponse(): GetLeaderboardResponse {
-  return { items: [] };
+  return { items: [], page: undefined };
 }
 
 export const GetLeaderboardResponse: MessageFns<GetLeaderboardResponse> = {
@@ -740,6 +762,9 @@ export const GetLeaderboardResponse: MessageFns<GetLeaderboardResponse> = {
       for (const v of message.items) {
         LeaderboardEntry.encode(v!, writer.uint32(10).fork()).join();
       }
+    }
+    if (message.page !== undefined) {
+      PageMeta.encode(message.page, writer.uint32(18).fork()).join();
     }
     return writer;
   },
@@ -762,6 +787,14 @@ export const GetLeaderboardResponse: MessageFns<GetLeaderboardResponse> = {
           }
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.page = PageMeta.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -774,6 +807,7 @@ export const GetLeaderboardResponse: MessageFns<GetLeaderboardResponse> = {
   fromJSON(object: any): GetLeaderboardResponse {
     return {
       items: globalThis.Array.isArray(object?.items) ? object.items.map((e: any) => LeaderboardEntry.fromJSON(e)) : [],
+      page: isSet(object.page) ? PageMeta.fromJSON(object.page) : undefined,
     };
   },
 
@@ -781,6 +815,9 @@ export const GetLeaderboardResponse: MessageFns<GetLeaderboardResponse> = {
     const obj: any = {};
     if (message.items?.length) {
       obj.items = message.items.map((e) => LeaderboardEntry.toJSON(e));
+    }
+    if (message.page !== undefined) {
+      obj.page = PageMeta.toJSON(message.page);
     }
     return obj;
   },
@@ -791,6 +828,7 @@ export const GetLeaderboardResponse: MessageFns<GetLeaderboardResponse> = {
   fromPartial<I extends Exact<DeepPartial<GetLeaderboardResponse>, I>>(object: I): GetLeaderboardResponse {
     const message = createBaseGetLeaderboardResponse();
     message.items = object.items?.map((e) => LeaderboardEntry.fromPartial(e)) || [];
+    message.page = (object.page !== undefined && object.page !== null) ? PageMeta.fromPartial(object.page) : undefined;
     return message;
   },
 };

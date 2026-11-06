@@ -102,20 +102,6 @@ test("mappings exclude credentials and preserve false, zero and null", () => {
     { problemId: 3, score: "10" },
     { problemId: 7, score: "2.5" },
   ]);
-  const values = map.structValue({
-    fields: {
-      enabled: { boolValue: false },
-      count: { numberValue: 0 },
-      empty: { nullValue: "NULL_VALUE" },
-      tags: { listValue: { values: [{ stringValue: "HPC" }] } },
-    },
-  });
-  assert.deepEqual(JSON.parse(JSON.stringify(values)), {
-    enabled: false,
-    count: 0,
-    empty: null,
-    tags: ["HPC"],
-  });
   assert.equal(
     map.timestamp({ seconds: "1", nanos: 500_000_000 }),
     "1970-01-01T00:00:01.500Z",
@@ -127,6 +113,133 @@ test("mappings exclude credentials and preserve false, zero and null", () => {
     ).total,
     0,
   );
+});
+
+test("Agent and Job projections distinguish executors without exposing private fields", () => {
+  const map = load("server/mapping");
+  for (const [executor, expected, executionId] of [
+    ["AGENT_EXECUTOR_SLURM", "slurm", "00012345"],
+    ["AGENT_EXECUTOR_DOCKER", "docker", "a".repeat(64)],
+  ]) {
+    const agent = map.agent({
+      id: "agent-1",
+      partition: "judge",
+      executor,
+      state: "AGENT_STATE_ONLINE",
+      workload: "AGENT_WORKLOAD_EMPTY",
+      activeJobCount: 0,
+      waitingJobCount: 0,
+      runningJobCount: 0,
+      sessionToken: "private-session",
+      serviceToken: "private-service",
+    });
+    assert.equal(agent.executor, expected);
+    assert.equal(agent.state, "online");
+    assert.equal(agent.workload, "empty");
+    assert.equal(agent.activeJobCount, 0);
+    assert.equal(typeof agent.activeJobCount, "number");
+    assert.equal(agent.drainRequestedAt, null);
+    assert.equal(agent.endedAt, null);
+    assert.equal("sessionToken" in agent, false);
+    assert.equal("serviceToken" in agent, false);
+    const job = map.job({
+      executionId,
+      state: "JOB_STATE_COMPLETED",
+      executionSnapshot: {
+        executor,
+        eligiblePartitions: ["judge"],
+        assignedPartition: "judge",
+        serviceToken: "private-service",
+      },
+      score: "0",
+      statusMessage: "",
+      sessionToken: "private-session",
+    });
+    assert.equal(job.executionSnapshot.executor, expected);
+    assert.equal(job.executionId, executionId);
+    assert.equal(typeof job.executionId, "string");
+    assert.equal(job.score, "0");
+    assert.equal(job.statusMessage, "");
+    assert.equal(job.state, "completed");
+    assert.equal(job.finishedAt, null);
+    assert.equal(job.result, null);
+    assert.equal(job.log, null);
+    assert.equal("slurmJobId" in job, false);
+    assert.equal("sessionToken" in job, false);
+    assert.equal("serviceToken" in job.executionSnapshot, false);
+  }
+});
+
+test("pending Job keeps absent execution metadata null without losing its executor", () => {
+  const map = load("server/mapping");
+  const job = map.job({
+    state: "JOB_STATE_PENDING",
+    executionSnapshot: { executor: "AGENT_EXECUTOR_DOCKER" },
+  });
+  assert.equal(job.executionSnapshot.executor, "docker");
+  assert.equal(job.executionId, null);
+  assert.equal(job.agentSessionId, null);
+  assert.equal(job.executionSnapshot.assignedPartition, null);
+  assert.deepEqual(Array.from(job.executionSnapshot.eligiblePartitions), []);
+  assert.equal(job.cancelRequestedAt, null);
+  assert.equal(job.verdict, null);
+  assert.equal(job.score, null);
+  assert.equal(job.statusMessage, null);
+  assert.equal(map.job({
+    executionId: "",
+    executionSnapshot: { executor: "AGENT_EXECUTOR_SLURM" },
+  }).executionId, "");
+});
+
+test("executor projection rejects missing and unknown enums without disclosing their values", () => {
+  const map = load("server/mapping");
+  const invalidExecutor = (error) => {
+    assert.equal(error.message.includes("private-executor-value"), false);
+    return true;
+  };
+  for (const executor of [undefined, null, "AGENT_EXECUTOR_UNSPECIFIED", "private-executor-value", 1, 2, false]) {
+    assert.throws(() => map.agent({ executor }), invalidExecutor);
+    assert.throws(() => map.job({ executionSnapshot: { executor } }), invalidExecutor);
+  }
+  assert.throws(() => map.agent(), invalidExecutor);
+  assert.throws(() => map.job(), invalidExecutor);
+  assert.throws(() => map.job({ executionSnapshot: null }), invalidExecutor);
+});
+
+test("manifest mappings preserve decoded JSON, including wrapper-like object keys", () => {
+  const messages = load("generated/soj/v1/common", {
+    require: (name) => name.startsWith("../../google/protobuf/")
+      ? load(`generated/google/protobuf/${name.split("/").at(-1)}`, { require: nodeRequire })
+      : nodeRequire(name),
+  });
+  const map = load("server/mapping");
+  const manifest = {
+    schemaVersion: 1,
+    problemId: 1,
+    docker: {
+      image: `judge-image@sha256:${"a".repeat(64)}`,
+      cpus: 1,
+      memoryMb: 128,
+      timeLimitSeconds: 10,
+    },
+    enabled: false,
+    count: 0,
+    empty: null,
+    tags: ["HPC"],
+    nested: {
+      values: [0, false, null],
+      stringValue: "literal",
+      numberValue: 12,
+    },
+  };
+  const pkg = messages.ProblemPackage.decode(
+    messages.ProblemPackage.encode({ manifest }).finish(),
+  );
+  const snapshot = messages.JobExecutionSnapshot.decode(
+    messages.JobExecutionSnapshot.encode({ manifest, executor: "AGENT_EXECUTOR_DOCKER" }).finish(),
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(map.adminProblem({ package: pkg }).package.manifest)), manifest);
+  assert.deepEqual(JSON.parse(JSON.stringify(map.job({ executionSnapshot: snapshot }).executionSnapshot.manifest)), manifest);
 });
 
 test("shared client preserves raw uploads, disables caching and handles BFF errors", async () => {

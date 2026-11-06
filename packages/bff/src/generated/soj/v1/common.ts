@@ -648,6 +648,59 @@ export function verdictToNumber(object: Verdict): number {
   }
 }
 
+export enum AgentExecutor {
+  AGENT_EXECUTOR_UNSPECIFIED = "AGENT_EXECUTOR_UNSPECIFIED",
+  AGENT_EXECUTOR_SLURM = "AGENT_EXECUTOR_SLURM",
+  AGENT_EXECUTOR_DOCKER = "AGENT_EXECUTOR_DOCKER",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export function agentExecutorFromJSON(object: any): AgentExecutor {
+  switch (object) {
+    case 0:
+    case "AGENT_EXECUTOR_UNSPECIFIED":
+      return AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED;
+    case 1:
+    case "AGENT_EXECUTOR_SLURM":
+      return AgentExecutor.AGENT_EXECUTOR_SLURM;
+    case 2:
+    case "AGENT_EXECUTOR_DOCKER":
+      return AgentExecutor.AGENT_EXECUTOR_DOCKER;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return AgentExecutor.UNRECOGNIZED;
+  }
+}
+
+export function agentExecutorToJSON(object: AgentExecutor): string {
+  switch (object) {
+    case AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED:
+      return "AGENT_EXECUTOR_UNSPECIFIED";
+    case AgentExecutor.AGENT_EXECUTOR_SLURM:
+      return "AGENT_EXECUTOR_SLURM";
+    case AgentExecutor.AGENT_EXECUTOR_DOCKER:
+      return "AGENT_EXECUTOR_DOCKER";
+    case AgentExecutor.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+export function agentExecutorToNumber(object: AgentExecutor): number {
+  switch (object) {
+    case AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED:
+      return 0;
+    case AgentExecutor.AGENT_EXECUTOR_SLURM:
+      return 1;
+    case AgentExecutor.AGENT_EXECUTOR_DOCKER:
+      return 2;
+    case AgentExecutor.UNRECOGNIZED:
+    default:
+      return -1;
+  }
+}
+
 export enum AgentState {
   AGENT_STATE_UNSPECIFIED = "AGENT_STATE_UNSPECIFIED",
   AGENT_STATE_OFFLINE = "AGENT_STATE_OFFLINE",
@@ -778,78 +831,78 @@ export function agentWorkloadToNumber(object: AgentWorkload): number {
   }
 }
 
-export enum SlurmTerminalState {
-  SLURM_TERMINAL_STATE_UNSPECIFIED = "SLURM_TERMINAL_STATE_UNSPECIFIED",
-  SLURM_TERMINAL_STATE_COMPLETED = "SLURM_TERMINAL_STATE_COMPLETED",
-  SLURM_TERMINAL_STATE_FAILED = "SLURM_TERMINAL_STATE_FAILED",
-  SLURM_TERMINAL_STATE_TIMEOUT = "SLURM_TERMINAL_STATE_TIMEOUT",
-  SLURM_TERMINAL_STATE_OUT_OF_MEMORY = "SLURM_TERMINAL_STATE_OUT_OF_MEMORY",
-  SLURM_TERMINAL_STATE_CANCELLED = "SLURM_TERMINAL_STATE_CANCELLED",
+export enum ExecutionTerminalState {
+  EXECUTION_TERMINAL_STATE_UNSPECIFIED = "EXECUTION_TERMINAL_STATE_UNSPECIFIED",
+  EXECUTION_TERMINAL_STATE_COMPLETED = "EXECUTION_TERMINAL_STATE_COMPLETED",
+  EXECUTION_TERMINAL_STATE_FAILED = "EXECUTION_TERMINAL_STATE_FAILED",
+  EXECUTION_TERMINAL_STATE_TIMEOUT = "EXECUTION_TERMINAL_STATE_TIMEOUT",
+  EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY = "EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY",
+  EXECUTION_TERMINAL_STATE_CANCELLED = "EXECUTION_TERMINAL_STATE_CANCELLED",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
-export function slurmTerminalStateFromJSON(object: any): SlurmTerminalState {
+export function executionTerminalStateFromJSON(object: any): ExecutionTerminalState {
   switch (object) {
     case 0:
-    case "SLURM_TERMINAL_STATE_UNSPECIFIED":
-      return SlurmTerminalState.SLURM_TERMINAL_STATE_UNSPECIFIED;
+    case "EXECUTION_TERMINAL_STATE_UNSPECIFIED":
+      return ExecutionTerminalState.EXECUTION_TERMINAL_STATE_UNSPECIFIED;
     case 1:
-    case "SLURM_TERMINAL_STATE_COMPLETED":
-      return SlurmTerminalState.SLURM_TERMINAL_STATE_COMPLETED;
+    case "EXECUTION_TERMINAL_STATE_COMPLETED":
+      return ExecutionTerminalState.EXECUTION_TERMINAL_STATE_COMPLETED;
     case 2:
-    case "SLURM_TERMINAL_STATE_FAILED":
-      return SlurmTerminalState.SLURM_TERMINAL_STATE_FAILED;
+    case "EXECUTION_TERMINAL_STATE_FAILED":
+      return ExecutionTerminalState.EXECUTION_TERMINAL_STATE_FAILED;
     case 3:
-    case "SLURM_TERMINAL_STATE_TIMEOUT":
-      return SlurmTerminalState.SLURM_TERMINAL_STATE_TIMEOUT;
+    case "EXECUTION_TERMINAL_STATE_TIMEOUT":
+      return ExecutionTerminalState.EXECUTION_TERMINAL_STATE_TIMEOUT;
     case 4:
-    case "SLURM_TERMINAL_STATE_OUT_OF_MEMORY":
-      return SlurmTerminalState.SLURM_TERMINAL_STATE_OUT_OF_MEMORY;
+    case "EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY":
+      return ExecutionTerminalState.EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY;
     case 5:
-    case "SLURM_TERMINAL_STATE_CANCELLED":
-      return SlurmTerminalState.SLURM_TERMINAL_STATE_CANCELLED;
+    case "EXECUTION_TERMINAL_STATE_CANCELLED":
+      return ExecutionTerminalState.EXECUTION_TERMINAL_STATE_CANCELLED;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return SlurmTerminalState.UNRECOGNIZED;
+      return ExecutionTerminalState.UNRECOGNIZED;
   }
 }
 
-export function slurmTerminalStateToJSON(object: SlurmTerminalState): string {
+export function executionTerminalStateToJSON(object: ExecutionTerminalState): string {
   switch (object) {
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_UNSPECIFIED:
-      return "SLURM_TERMINAL_STATE_UNSPECIFIED";
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_COMPLETED:
-      return "SLURM_TERMINAL_STATE_COMPLETED";
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_FAILED:
-      return "SLURM_TERMINAL_STATE_FAILED";
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_TIMEOUT:
-      return "SLURM_TERMINAL_STATE_TIMEOUT";
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_OUT_OF_MEMORY:
-      return "SLURM_TERMINAL_STATE_OUT_OF_MEMORY";
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_CANCELLED:
-      return "SLURM_TERMINAL_STATE_CANCELLED";
-    case SlurmTerminalState.UNRECOGNIZED:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_UNSPECIFIED:
+      return "EXECUTION_TERMINAL_STATE_UNSPECIFIED";
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_COMPLETED:
+      return "EXECUTION_TERMINAL_STATE_COMPLETED";
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_FAILED:
+      return "EXECUTION_TERMINAL_STATE_FAILED";
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_TIMEOUT:
+      return "EXECUTION_TERMINAL_STATE_TIMEOUT";
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY:
+      return "EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY";
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_CANCELLED:
+      return "EXECUTION_TERMINAL_STATE_CANCELLED";
+    case ExecutionTerminalState.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
 }
 
-export function slurmTerminalStateToNumber(object: SlurmTerminalState): number {
+export function executionTerminalStateToNumber(object: ExecutionTerminalState): number {
   switch (object) {
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_UNSPECIFIED:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_UNSPECIFIED:
       return 0;
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_COMPLETED:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_COMPLETED:
       return 1;
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_FAILED:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_FAILED:
       return 2;
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_TIMEOUT:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_TIMEOUT:
       return 3;
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_OUT_OF_MEMORY:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY:
       return 4;
-    case SlurmTerminalState.SLURM_TERMINAL_STATE_CANCELLED:
+    case ExecutionTerminalState.EXECUTION_TERMINAL_STATE_CANCELLED:
       return 5;
-    case SlurmTerminalState.UNRECOGNIZED:
+    case ExecutionTerminalState.UNRECOGNIZED:
     default:
       return -1;
   }
@@ -981,6 +1034,7 @@ export interface JobExecutionSnapshot {
   manifest?: { [key: string]: any } | undefined;
   eligiblePartitions?: string[] | undefined;
   assignedPartition?: string | undefined;
+  executor?: AgentExecutor | undefined;
 }
 
 export interface Job {
@@ -988,7 +1042,7 @@ export interface Job {
   submissionId?: number | undefined;
   state?: JobState | undefined;
   agentSessionId?: string | undefined;
-  slurmJobId?: string | undefined;
+  executionId?: string | undefined;
   executionSnapshot?: JobExecutionSnapshot | undefined;
   verdict?: Verdict | undefined;
   score?: string | undefined;
@@ -1015,6 +1069,7 @@ export interface AgentSession {
   activeJobCount?: number | undefined;
   drainRequestedAt?: Timestamp | undefined;
   endedAt?: Timestamp | undefined;
+  executor?: AgentExecutor | undefined;
 }
 
 function createBaseEmpty(): Empty {
@@ -2991,6 +3046,7 @@ function createBaseJobExecutionSnapshot(): JobExecutionSnapshot {
     manifest: undefined,
     eligiblePartitions: [],
     assignedPartition: undefined,
+    executor: AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED,
   };
 }
 
@@ -3012,6 +3068,9 @@ export const JobExecutionSnapshot: MessageFns<JobExecutionSnapshot> = {
     }
     if (message.assignedPartition !== undefined) {
       writer.uint32(42).string(message.assignedPartition);
+    }
+    if (message.executor !== undefined && message.executor !== AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED) {
+      writer.uint32(48).int32(agentExecutorToNumber(message.executor));
     }
     return writer;
   },
@@ -3066,6 +3125,14 @@ export const JobExecutionSnapshot: MessageFns<JobExecutionSnapshot> = {
           message.assignedPartition = reader.string();
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.executor = agentExecutorFromJSON(reader.int32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3084,6 +3151,9 @@ export const JobExecutionSnapshot: MessageFns<JobExecutionSnapshot> = {
         ? object.eligiblePartitions.map((e: any) => globalThis.String(e))
         : [],
       assignedPartition: isSet(object.assignedPartition) ? globalThis.String(object.assignedPartition) : undefined,
+      executor: isSet(object.executor)
+        ? agentExecutorFromJSON(object.executor)
+        : AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED,
     };
   },
 
@@ -3104,6 +3174,9 @@ export const JobExecutionSnapshot: MessageFns<JobExecutionSnapshot> = {
     if (message.assignedPartition !== undefined) {
       obj.assignedPartition = message.assignedPartition;
     }
+    if (message.executor !== undefined && message.executor !== AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED) {
+      obj.executor = agentExecutorToJSON(message.executor);
+    }
     return obj;
   },
 
@@ -3117,6 +3190,7 @@ export const JobExecutionSnapshot: MessageFns<JobExecutionSnapshot> = {
     message.manifest = object.manifest ?? undefined;
     message.eligiblePartitions = object.eligiblePartitions?.map((e) => e) || [];
     message.assignedPartition = object.assignedPartition ?? undefined;
+    message.executor = object.executor ?? AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED;
     return message;
   },
 };
@@ -3127,7 +3201,7 @@ function createBaseJob(): Job {
     submissionId: 0,
     state: JobState.JOB_STATE_UNSPECIFIED,
     agentSessionId: undefined,
-    slurmJobId: undefined,
+    executionId: undefined,
     executionSnapshot: undefined,
     verdict: undefined,
     score: undefined,
@@ -3157,8 +3231,8 @@ export const Job: MessageFns<Job> = {
     if (message.agentSessionId !== undefined) {
       writer.uint32(42).string(message.agentSessionId);
     }
-    if (message.slurmJobId !== undefined) {
-      writer.uint32(50).string(message.slurmJobId);
+    if (message.executionId !== undefined) {
+      writer.uint32(50).string(message.executionId);
     }
     if (message.executionSnapshot !== undefined) {
       JobExecutionSnapshot.encode(message.executionSnapshot, writer.uint32(58).fork()).join();
@@ -3243,7 +3317,7 @@ export const Job: MessageFns<Job> = {
             break;
           }
 
-          message.slurmJobId = reader.string();
+          message.executionId = reader.string();
           continue;
         }
         case 7: {
@@ -3357,7 +3431,7 @@ export const Job: MessageFns<Job> = {
       submissionId: isSet(object.submissionId) ? globalThis.Number(object.submissionId) : 0,
       state: isSet(object.state) ? jobStateFromJSON(object.state) : JobState.JOB_STATE_UNSPECIFIED,
       agentSessionId: isSet(object.agentSessionId) ? globalThis.String(object.agentSessionId) : undefined,
-      slurmJobId: isSet(object.slurmJobId) ? globalThis.String(object.slurmJobId) : undefined,
+      executionId: isSet(object.executionId) ? globalThis.String(object.executionId) : undefined,
       executionSnapshot: isSet(object.executionSnapshot)
         ? JobExecutionSnapshot.fromJSON(object.executionSnapshot)
         : undefined,
@@ -3389,8 +3463,8 @@ export const Job: MessageFns<Job> = {
     if (message.agentSessionId !== undefined) {
       obj.agentSessionId = message.agentSessionId;
     }
-    if (message.slurmJobId !== undefined) {
-      obj.slurmJobId = message.slurmJobId;
+    if (message.executionId !== undefined) {
+      obj.executionId = message.executionId;
     }
     if (message.executionSnapshot !== undefined) {
       obj.executionSnapshot = JobExecutionSnapshot.toJSON(message.executionSnapshot);
@@ -3440,7 +3514,7 @@ export const Job: MessageFns<Job> = {
     message.submissionId = object.submissionId ?? 0;
     message.state = object.state ?? JobState.JOB_STATE_UNSPECIFIED;
     message.agentSessionId = object.agentSessionId ?? undefined;
-    message.slurmJobId = object.slurmJobId ?? undefined;
+    message.executionId = object.executionId ?? undefined;
     message.executionSnapshot = (object.executionSnapshot !== undefined && object.executionSnapshot !== null)
       ? JobExecutionSnapshot.fromPartial(object.executionSnapshot)
       : undefined;
@@ -3486,6 +3560,7 @@ function createBaseAgentSession(): AgentSession {
     activeJobCount: 0,
     drainRequestedAt: undefined,
     endedAt: undefined,
+    executor: AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED,
   };
 }
 
@@ -3523,6 +3598,9 @@ export const AgentSession: MessageFns<AgentSession> = {
     }
     if (message.endedAt !== undefined) {
       Timestamp.encode(message.endedAt, writer.uint32(82).fork()).join();
+    }
+    if (message.executor !== undefined && message.executor !== AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED) {
+      writer.uint32(112).int32(agentExecutorToNumber(message.executor));
     }
     return writer;
   },
@@ -3622,6 +3700,14 @@ export const AgentSession: MessageFns<AgentSession> = {
           message.endedAt = Timestamp.decode(reader, reader.uint32());
           continue;
         }
+        case 14: {
+          if (tag !== 112) {
+            break;
+          }
+
+          message.executor = agentExecutorFromJSON(reader.int32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3646,6 +3732,9 @@ export const AgentSession: MessageFns<AgentSession> = {
       activeJobCount: isSet(object.activeJobCount) ? globalThis.Number(object.activeJobCount) : 0,
       drainRequestedAt: isSet(object.drainRequestedAt) ? fromJsonTimestamp(object.drainRequestedAt) : undefined,
       endedAt: isSet(object.endedAt) ? fromJsonTimestamp(object.endedAt) : undefined,
+      executor: isSet(object.executor)
+        ? agentExecutorFromJSON(object.executor)
+        : AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED,
     };
   },
 
@@ -3684,6 +3773,9 @@ export const AgentSession: MessageFns<AgentSession> = {
     if (message.endedAt !== undefined) {
       obj.endedAt = fromTimestamp(message.endedAt).toISOString();
     }
+    if (message.executor !== undefined && message.executor !== AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED) {
+      obj.executor = agentExecutorToJSON(message.executor);
+    }
     return obj;
   },
 
@@ -3711,6 +3803,7 @@ export const AgentSession: MessageFns<AgentSession> = {
     message.endedAt = (object.endedAt !== undefined && object.endedAt !== null)
       ? Timestamp.fromPartial(object.endedAt)
       : undefined;
+    message.executor = object.executor ?? AgentExecutor.AGENT_EXECUTOR_UNSPECIFIED;
     return message;
   },
 };

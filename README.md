@@ -10,7 +10,7 @@ apps/
   admin/     Admin: administrator-facing Next.js SSR/BFF
 services/
   api/       Control Plane: Go modular monolith and PostgreSQL owner
-  judge/     Judge Agent: Rust Slurm execution agent
+  judge/     Judge Agent: Rust Slurm/Docker execution agent
 packages/
   bff/       Shared Web/Admin adapters and generated TypeScript gRPC bindings
 proto/       Versioned Protobuf and generated Go bindings
@@ -93,8 +93,10 @@ connection, plus the hostname used by the Agent. Do not set
 to a loopback-only development listener. Apply `services/api/schema.sql`
 manually before starting the container, as required by the Control Plane.
 
-When bind-mounting `/var/lib/soj/tls`, make the directory writable by the
-container's `node` user (UID 1000) so it can create the initial certificate.
+When bind-mounting `/var/lib/soj/artifacts` or `/var/lib/soj/tls`, make each
+directory writable by the container's `node` user (UID 1000). The Control
+Plane verifies this when it starts; an unsuitable Artifact mount now prevents
+startup instead of making package uploads fail with HTTP 500.
 
 Web and Admin BFF tokens are generated independently with cryptographic
 randomness for every container start. They are only inherited by the three
@@ -110,10 +112,11 @@ the Control Plane refuse to start.
 
 ## 构建并运行 Judge Agent
 
-Judge Agent 不包含在 `soj` 镜像中。它应运行在可调用 `sbatch`、`squeue`、`sacct`
-和 `scancel` 的 Slurm 提交节点，并且 `judge_work_root` 必须能被该节点和计算节点
-共同访问。Agent 只经 gRPC 与受认证的 HTTP Artifact 接口连接 Control Plane，绝不
-连接 PostgreSQL，也不与 Control Plane 共享本地目录。
+Judge Agent 不包含在 `soj` 镜像中。同一二进制可部署为 Slurm 或 Docker Agent，
+通过 `agent_executor` 选择后端。Slurm 模式需要提交节点上的 `sbatch`、`squeue`、
+`sacct`、`scancel`，以及提交节点和计算节点共享的 `judge_work_root`；Docker 模式
+只需要同机 Linux Docker Engine、CLI 和本地工作目录。Agent 只经 gRPC 与受认证
+HTTP 连接 Control Plane，不连接 PostgreSQL，也不与 Control Plane 共享目录。
 
 在 Agent 主机上从源码构建二进制：
 
@@ -131,6 +134,7 @@ CA PEM。生产中请在挂载 `/var/lib/soj/tls` 前提供由部署方管理的
 `control-plane.internal`（或此处使用的其他主机名）。
 
 ```toml
+agent_executor = "slurm"
 agent_partition = "judge"
 agent_service_token = "与 AGENT_SERVICE_TOKEN 相同的强随机值"
 judge_work_root = "/var/lib/soj-judge/work"
@@ -157,6 +161,34 @@ Agent 会注册一个新的会话并为配置的 partition 主动领取任务。
 partition 前，请使用实际测评包验证正常、超时、OOM、取消和节点故障路径。更多执行
 与 Slurm 约束见 [`services/judge/README.md`](services/judge/README.md) 和
 [`docs/judge.md`](docs/judge.md)。
+
+### Docker Agent
+
+已有数据库升级前，先 drain Agent 并停止应用，人工执行
+[`20261105_docker_agent_executor.sql`](services/api/migrations/20261105_docker_agent_executor.sql)，
+再同步部署 Control Plane、Web/Admin 和 Agent。迁移保留历史执行值，并将字段统一为
+`executionId` / `executionTerminalState`；不保留旧 Slurm 字段别名。新数据库直接使用
+更新后的 `schema.sql`，不要重复执行迁移。
+
+复制 Docker 配置，使用与 Slurm 不同的 partition：
+
+```bash
+install -Dm600 services/judge/judge.docker.toml.example /etc/soj/judge-docker.toml
+# 配置 service token、TLS CA、本地 workspace 与 Docker socket 后运行：
+soj-judge /etc/soj/judge-docker.toml
+```
+
+Docker Agent 本地串行处理 Job，镜像必须由运维预装；包的 manifest 声明固定摘要、
+CPU/内存/时间限制，并提供 `judge.sh`。将 Problem 的候选分区设置为该 Docker partition，
+再上传 Docker 包；Control Plane 同时匹配分区和 executor，不让错误类型的 Agent 领取。
+容器只挂载当前 Job，默认无网络、只读 rootfs、无额外 capabilities，以宿主 Agent
+UID:GID 执行；Docker socket 和控制面凭据不进入容器。访问 Docker socket 本身仍是
+宿主高权限，必须使用受控的专用非 root Agent 用户和目录；Docker后端拒绝euid=0。
+
+可运行的加法应用和正常/错误答案/限时/OOM输入在
+[`examples/docker-soj-package`](examples/docker-soj-package/)；打包与部署步骤见
+[`services/judge/README.md`](services/judge/README.md#可运行的-docker-示例包)。Docker
+模式是单机 CPU 执行后端，不提供 Slurm/MPI 多节点或任意特权容器编排。
 
 ## Documentation
 
@@ -252,17 +284,120 @@ Real Slurm and browser end-to-end acceptance remains outstanding.
 
 ### Deliberate redundancy candidates
 
-- Contest listing still reads Problem summaries per item; optimize it only with
-  separate authorization and ordering verification.
-- Ranking-page counting repeats the scoring query; it can be simplified only
-  while preserving the same snapshot semantics.
 - `source_content_type` duplicates Artifact information and
   `disqualified_reason` currently receives a fixed value. Removing either
   requires an explicit database upgrade strategy. `finishing_at` is lifecycle
   history and is intentionally retained.
-- The Admin BFF has one centralized route handler. It may later be split by
-  resource, but the current path-existence and query-whitelist mapping must
-  retain its error and authorization behavior first.
+
+### 2026-11-04 complexity fixes
+
+- Admin collection pages and Problem selectors now request only the current
+  server page. Web rankings are paged and loaded when their tab opens, with
+  failure recovery and global ranks preserved; see [`docs/frontend.md`](docs/frontend.md)
+  and the [Browser contract](docs/bff-contract.md).
+- Ranking COUNT no longer evaluates scores; each request evaluates only its
+  scoring policy and reads per-Problem scores for the selected page. Contest
+  lists batch their Problem summaries after closing the main cursor.
+- Artifact/Job reference indexes and the pending-partition GIN index have a
+  [manual upgrade](services/api/migrations/20261104_artifact_reference_and_pending_partition_indexes.sql).
+  Claim keeps FIFO/skip-locked semantics and exact diagnostic counts; temporary
+  object cleanup streams bounded directory batches. Registration-code expiry
+  uses an amortized ordered queue rather than a whole-map scan per request.
+- Judge bounds workspace entries/depth, scans independently from cancellation
+  and Slurm status, suppresses unchanged phase reports and shares cancellation
+  membership. CLI deadlines and Accounting backoff preserve uncertain-workspace
+  retention; archive framing remains owned by the existing tar library. Exact
+  limits and detection timing are in [`docs/judge.md`](docs/judge.md).
+- Verified with disposable PostgreSQL integration tests and manual index upgrade,
+  shared BFF type/lint/tests, Web/Admin lint/production builds and real browser
+  pagination/selection/failure-recovery flows. Rust tests cover filesystem,
+  process deadlines and state transitions; a real Agent registered, claimed and
+  reported a staging failure to Control Plane. No real Slurm workload ran.
+
+### 2026-11-05 BFF routing simplification
+
+- Web and Admin now use one shared dispatcher and explicit local route tables.
+  Each path declares its methods and read-query whitelist once; authentication
+  routes use the same dispatcher, with registration available only on Web.
+- Removed the separate route-existence maps and repeated query validation.
+  Known action paths, including password reset, now return 405 for unsupported
+  methods; unknown paths return 404. Origin and query-error precedence is
+  specified in the [Browser contract](docs/bff-contract.md#错误与cookie).
+- Shared BFF lint/type checks and 16 tests, plus Web/Admin lint and production
+  builds passed. Production BFFs were exercised against disposable PostgreSQL
+  and a real Control Plane for authentication, paged reads, package/source
+  uploads, source GET/HEAD, cancellation/rejudge, qualification and password
+  reset. Real browser logins, registered Contest SSR and Admin user listing
+  also passed. No real Slurm workload was run.
+
+### 2026-11-05 Docker Agent
+
+- The Rust Agent now selects Slurm or local Docker with `agent_executor`;
+  registration and claims match executor plus partition. Job and Browser fields
+  use `executionId` and normalized execution terminal states, with no Slurm aliases.
+- Docker packages pin a preloaded image and CPU/memory/time limits, and run
+  `judge.sh` under a non-root host UID with fixed mounts and restricted container
+  settings. The shared Artifact, result, cancellation and drain lifecycle remains.
+- Go tests including disposable-PostgreSQL integration and build passed; Rust
+  check/build and 41 tests passed; shared BFF lint/types and 19 tests, plus both
+  applications' lint and production builds passed. The manual migration preserved
+  existing Slurm execution IDs, terminal states and results in an isolated old-shape DB.
+- Real Docker acceptance covered application results, nonzero exits, timeout,
+  cgroup OOM, cancellation, serial admission, archive bytes, cleanup, type routing,
+  active drain/SIGTERM and browser Agent/Job displays. Local socket fault injection
+  verified lost create responses and running-channel loss retain the container and
+  workspace, fail the old session and allow a new session to process only new work.
+  Root identity rejection was exercised in an unprivileged user namespace.
+- The Docker example itself produced accepted/100 and wrong_answer/0 through the
+  actual Agent. These tests do not replace real Slurm partition acceptance; no real
+  Slurm workload ran. Existing deployment data was not modified.
+
+### 2026-11-06 audit fixes
+
+- Business deletion now removes pending uploads and detaches available upload
+  provenance before deleting Jobs; shared Artifact references remain counted.
+  Submission creation and rejudge lock only the Problem when reading its package.
+- Failed logout preserves identity and reports the failure in both apps. Contest
+  registration refreshes SSR so newly authorized Problems appear immediately.
+- Judge tolerates transient file disappearance only during active workspace scans,
+  bounds Artifact waits, cancels preparation before cleanup, and rejects explicit
+  null result messages. Timeout details are in the Judge contract.
+- Next.js and its ESLint config are aligned at 16.4.5; production dependency audit
+  reports zero advisories. Web uses bundled local Geist fonts rather than Google downloads.
+- Verification passed: disposable-PostgreSQL Go integration tests and build, Rust
+  check/build and 49 tests, shared BFF lint/types and 19 tests, and both apps' lint/build.
+  Real browser scenarios covered failed/successful logout, registration and 12 concurrent
+  submissions. A real Docker Agent completed accepted/100, cancelled a stalled input
+  download, completed the next Job, and reclaimed all eight package/source/archive objects
+  when its private Problem was deleted. No real Slurm workload ran.
+
+### 2026-11-06 Slurm cleanup confirmation
+
+- Slurm state parsing now inspects every token in supported JSON arrays and
+  strings. `COMPLETING` takes precedence over terminal base states until epilog
+  cleanup ends, including cancellation.
+- Rust check/build and 51 tests passed. A real Judge process and Control Plane,
+  with Slurm CLI fixtures isolated in a mount namespace, retained finishing state
+  and workspace for both completed and cancelled base states while the flag was
+  present. Removing it allowed the correct terminal report and workspace cleanup.
+  This controlled CLI smoke run does not replace real Slurm partition acceptance.
+
+### 2026-11-06 code organization
+
+- Grouped Admin BFF imports and local request types, normalized route-handler
+  indentation, and removed redundant Judge metadata reads, unreachable result
+  handling and repeated Docker argument formatting.
+- Cluster-snapshot integration tests use connection-local fixture tables so
+  concurrent Agent-registration tests cannot change their aggregate counts.
+  Executor-error tests check private-value exclusion rather than exact wording.
+- Verified Go integration tests against disposable PostgreSQL and built Control
+  Plane; Rust check/build and 51 tests; shared BFF lint/types and 19 tests; both
+  applications' lint/production builds; production dependency audit (zero advisories).
+- Real production services and Docker Agent completed package/source uploads and
+  an accepted/100 Job with persisted execution metadata. Browser interactions
+  covered login, Contest registration/Problem refresh and Admin Job details.
+  Screenshot inspection was unavailable in the current tool configuration;
+  no real Slurm workload ran.
 
 ## Development
 
@@ -295,6 +430,12 @@ CI runner; `dist/` is a local build-output convention, not a portable release
 bundle. The Next.js applications do not currently enable Next's standalone
 output mode, so their `.next/` directories must be deployed with the matching
 application files, `packages/bff`, `proto`, and matching workspace Node dependencies.
+
+Web bundles Geist Sans and Geist Mono from the `geist` npm package; builds and
+browsers do not fetch fonts from Google. Keep Next.js and eslint-config-next
+aligned across both apps and `packages/bff`. The root KaTeX override keeps the
+Markdown plugins and their CSS on the same patched renderer version; verify
+math rendering and run `npm audit --omit=dev` when updating the workspace lockfile.
 
 `cd services/api && go build ./...` remains useful as a compile check, but it
 does not produce a reusable executable in the repository. Use `make build-api`

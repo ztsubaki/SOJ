@@ -1,17 +1,16 @@
 "use client";
 import Panel from "@/components/ui/Panel";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import Select from "@/components/form/Select";
 import Switch from "@/components/form/switch/Switch";
 import MarkdownEditor from "@/components/form/MarkdownEditor";
-import SearchableMultiSelect from "@/components/form/SearchableMultiSelect";
+import ProblemMultiSelect from "@/components/form/ProblemMultiSelect";
 import type { ContestForm } from "@/lib/admin-types";
 import { fromLocalDateTime, toLocalDateTime } from "@/lib/local-datetime";
-import { allPages } from "@/lib/pagination";
 import { ToastMessage } from "@/context/ToastContext";
 
 const scoringPolicyOptions = [
@@ -37,26 +36,9 @@ const emptyContest: ContestForm = {
 export default function NewContestPage() {
   const router = useRouter();
   const [form, setForm] = useState<ContestForm>(emptyContest);
-  const [problemOptions, setProblemOptions] = useState<
-    { value: string; label: string }[]
-  >([]);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    void allPages<{ id: number; title: string }>("/admin/problems")
-      .then((data) =>
-        setProblemOptions(
-          data.map((problem) => ({
-            value: String(problem.id),
-            label: `${problem.title} (${problem.id})`,
-          })),
-        ),
-      )
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : "无法读取题目列表"),
-      );
-  }, []);
 
   const updateField = <K extends keyof ContestForm>(
     field: K,
@@ -225,13 +207,9 @@ export default function NewContestPage() {
             选择本场比赛包含的题目
           </p>
           <div className="mt-4">
-            <SearchableMultiSelect
-              id="problems"
-              options={problemOptions}
-              selected={form.problems.map(String)}
-              onChange={(problems) => updateField("problems", problems.map(Number))}
-              placeholder="选择题目"
-              searchPlaceholder="搜索题目名称或 ID"
+            <ProblemMultiSelect
+              selected={form.problems}
+              onChange={(problems) => updateField("problems", problems)}
             />
           </div>
         </Panel>

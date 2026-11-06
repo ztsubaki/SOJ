@@ -16,29 +16,26 @@ import {
 } from "@/components/ui/table";
 import type { ContestDetail, RankItem } from "@/lib/admin-types";
 import { statusColor } from "@/lib/presentation";
-import { allPages } from "@/lib/pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
+import Pagination from "@/components/ui/Pagination";
 import { ToastMessage } from "@/context/ToastContext";
 
 export default function ContestRankingsPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [contest, setContest] = useState<ContestDetail | null>(null);
-  const [items, setItems] = useState<RankItem[]>([]);
+  const { items, page, pageSize, total, loading, error: listError, setPage, refresh } = usePaginatedQuery<RankItem>(`/admin/contests/${encodeURIComponent(id)}/rankings`);
   const [error, setError] = useState("");
   const [changingUser, setChangingUser] = useState<number | null>(null);
 
   useEffect(() => {
-    void Promise.all([
-      request<ContestDetail>(`/admin/contests/${encodeURIComponent(id)}`),
-      allPages<RankItem>(`/admin/contests/${encodeURIComponent(id)}/rankings`),
-    ])
-      .then(([contest, rankings]) => {
-        setContest(contest);
-        setItems(rankings);
-      })
-      .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : "无法读取比赛排名"),
-      );
+    const controller = new AbortController();
+    void request<ContestDetail>(`/admin/contests/${encodeURIComponent(id)}`, { signal: controller.signal })
+      .then((detail) => { if (!controller.signal.aborted) setContest(detail); })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "无法读取比赛排名");
+      });
+    return () => controller.abort();
   }, [id]);
 
   async function changeParticipant(item: RankItem) {
@@ -56,13 +53,7 @@ export default function ContestRankingsPage() {
         } | null;
         throw new Error(body?.error ?? "更新参赛者状态失败");
       }
-      setItems((current) =>
-        current.map((entry) =>
-          entry.user.id === item.user.id
-            ? { ...entry, disqualified: !entry.disqualified }
-            : entry,
-        ),
-      );
+      refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "更新参赛者状态失败");
     } finally {
@@ -70,7 +61,7 @@ export default function ContestRankingsPage() {
     }
   }
 
-  if (!contest)
+  if (!contest || contest.id !== Number(id))
     return (
       <Panel className="p-8 text-center">
         <ToastMessage message={error} />
@@ -97,7 +88,7 @@ export default function ContestRankingsPage() {
         </div>
       </div>
       <Panel className="col-span-12 p-5">
-        <ToastMessage message={error} />
+        <ToastMessage message={error || listError} />
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -159,6 +150,7 @@ export default function ContestRankingsPage() {
             </TableBody>
           </Table>
         </div>
+        <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
       </Panel>
     </div>
   );

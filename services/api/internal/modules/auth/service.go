@@ -44,9 +44,16 @@ const (
 )
 
 type emailVerification struct {
-	code      string
-	sentAt    time.Time
-	expiresAt time.Time
+	code       string
+	sentAt     time.Time
+	expiresAt  time.Time
+	generation uint64
+}
+
+type emailVerificationExpiration struct {
+	email      string
+	expiresAt  time.Time
+	generation uint64
 }
 
 type User struct {
@@ -68,6 +75,9 @@ type Service struct {
 	verificationMu              sync.Mutex
 	emailVerifications          map[string]emailVerification
 	emailVerificationDeliveries map[string]struct{}
+	emailVerificationExpirations    []emailVerificationExpiration
+	emailVerificationExpirationHead int
+	emailVerificationGeneration     uint64
 }
 
 // NewPostgresService uses PostgreSQL for users and server-side sessions.
@@ -136,11 +146,7 @@ func (s *Service) issueRegistrationEmailVerification(ctx context.Context, email 
 	}
 	now := time.Now()
 	s.verificationMu.Lock()
-	for key, verification := range s.emailVerifications {
-		if !verification.expiresAt.After(now) {
-			delete(s.emailVerifications, key)
-		}
-	}
+	s.expireRegistrationEmailVerificationsLocked(now)
 	if verification, ok := s.emailVerifications[email]; ok && now.Before(verification.sentAt.Add(registrationEmailVerificationCooldown)) {
 		s.verificationMu.Unlock()
 		return 0, ErrEmailVerificationRateLimited
@@ -172,11 +178,43 @@ func (s *Service) issueRegistrationEmailVerification(ctx context.Context, email 
 	s.verificationMu.Lock()
 	delete(s.emailVerificationDeliveries, email)
 	now = time.Now()
-	s.emailVerifications[email] = emailVerification{
+	s.emailVerificationGeneration++
+	verification := emailVerification{
 		code: code, sentAt: now, expiresAt: now.Add(registrationEmailVerificationTTL),
+		generation: s.emailVerificationGeneration,
 	}
+	s.emailVerifications[email] = verification
+	s.emailVerificationExpirations = append(s.emailVerificationExpirations, emailVerificationExpiration{
+		email: email, expiresAt: verification.expiresAt, generation: verification.generation,
+	})
 	s.verificationMu.Unlock()
 	return uint32(registrationEmailVerificationCooldown / time.Second), nil
+}
+
+// Successful deliveries share a TTL and are recorded under verificationMu, so
+// expirations are ordered. Each record is removed once; compaction is amortized
+// over the expired prefix rather than scanning all live verifications.
+func (s *Service) expireRegistrationEmailVerificationsLocked(now time.Time) {
+	for s.emailVerificationExpirationHead < len(s.emailVerificationExpirations) {
+		expiration := s.emailVerificationExpirations[s.emailVerificationExpirationHead]
+		if expiration.expiresAt.After(now) {
+			break
+		}
+		if verification, ok := s.emailVerifications[expiration.email]; ok && verification.generation == expiration.generation {
+			delete(s.emailVerifications, expiration.email)
+		}
+		s.emailVerificationExpirations[s.emailVerificationExpirationHead] = emailVerificationExpiration{}
+		s.emailVerificationExpirationHead++
+	}
+	if s.emailVerificationExpirationHead == len(s.emailVerificationExpirations) {
+		s.emailVerificationExpirations = nil
+		s.emailVerificationExpirationHead = 0
+	} else if s.emailVerificationExpirationHead >= len(s.emailVerificationExpirations)-s.emailVerificationExpirationHead {
+		remaining := copy(s.emailVerificationExpirations, s.emailVerificationExpirations[s.emailVerificationExpirationHead:])
+		clear(s.emailVerificationExpirations[remaining:])
+		s.emailVerificationExpirations = s.emailVerificationExpirations[:remaining]
+		s.emailVerificationExpirationHead = 0
+	}
 }
 
 func randomEmailVerificationCode() (string, error) {

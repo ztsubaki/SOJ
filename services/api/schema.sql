@@ -59,7 +59,7 @@ CREATE TABLE artifacts (
     )
 );
 CREATE INDEX artifacts_pending_created_idx ON artifacts (created_at) WHERE state = 'pending';
-CREATE INDEX artifacts_pending_job_idx ON artifacts (upload_job_id) WHERE state = 'pending';
+CREATE INDEX artifacts_upload_job_idx ON artifacts (upload_job_id);
 
 CREATE TABLE problems (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -78,6 +78,7 @@ CREATE TABLE problems (
     CONSTRAINT problems_partitions_distinct CHECK (soj_text_array_is_distinct(candidate_partitions))
 );
 CREATE INDEX problems_enabled_idx ON problems (enabled, created_at DESC, id ASC);
+CREATE INDEX problems_package_artifact_idx ON problems (package_artifact_id);
 
 CREATE TABLE contests (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -137,10 +138,13 @@ CREATE TABLE submissions (
 CREATE INDEX submissions_user_created_idx ON submissions (user_id, created_at DESC, id ASC);
 CREATE INDEX submissions_contest_user_idx ON submissions (contest_id, user_id, created_at DESC, id DESC) WHERE kind = 'contest';
 CREATE INDEX submissions_problem_created_idx ON submissions (problem_id, created_at DESC, id ASC);
+CREATE INDEX submissions_source_artifact_idx ON submissions (source_artifact_id);
+CREATE INDEX submissions_current_job_idx ON submissions (current_job_id);
 
 CREATE TABLE agent_sessions (
     id text PRIMARY KEY,
     partition text NOT NULL,
+    executor text NOT NULL DEFAULT 'slurm' CHECK (executor IN ('slurm', 'docker')),
     registered_at timestamptz NOT NULL DEFAULT now(),
     last_heartbeat_at timestamptz NOT NULL DEFAULT now(),
     drain_requested_at timestamptz,
@@ -166,8 +170,8 @@ CREATE TABLE judge_jobs (
     state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'claimed', 'submitted', 'running', 'finishing', 'completed', 'cancelled', 'internal_error')),
     agent_session_id text REFERENCES agent_sessions(id) ON DELETE RESTRICT,
     assigned_partition text,
-    slurm_job_id text,
-    slurm_terminal_state text CHECK (slurm_terminal_state IN ('COMPLETED', 'FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED')),
+    execution_id text,
+    execution_terminal_state text CHECK (execution_terminal_state IN ('COMPLETED', 'FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED')),
     result_artifact_id bigint REFERENCES artifacts(id) ON DELETE RESTRICT,
     log_artifact_id bigint REFERENCES artifacts(id) ON DELETE RESTRICT,
     verdict text CHECK (verdict IN ('accepted', 'wrong_answer', 'compile_error', 'runtime_error', 'time_limit', 'memory_limit')),
@@ -189,6 +193,11 @@ CREATE TABLE judge_jobs (
     CONSTRAINT judge_jobs_score_nonnegative CHECK (score IS NULL OR score >= 0)
 );
 CREATE INDEX judge_jobs_claim_idx ON judge_jobs (created_at ASC, id ASC) WHERE state = 'pending';
+CREATE INDEX judge_jobs_pending_partitions_idx ON judge_jobs USING gin (eligible_partitions) WHERE state = 'pending';
+CREATE INDEX judge_jobs_source_artifact_idx ON judge_jobs (source_artifact_id);
+CREATE INDEX judge_jobs_package_artifact_idx ON judge_jobs (package_artifact_id);
+CREATE INDEX judge_jobs_result_artifact_idx ON judge_jobs (result_artifact_id);
+CREATE INDEX judge_jobs_log_artifact_idx ON judge_jobs (log_artifact_id);
 CREATE INDEX judge_jobs_session_state_idx ON judge_jobs (agent_session_id, state) WHERE state IN ('claimed', 'submitted', 'running', 'finishing');
 CREATE INDEX judge_jobs_submission_created_idx ON judge_jobs (submission_id, created_at ASC, id ASC);
 CREATE UNIQUE INDEX judge_jobs_session_waiting_unique ON judge_jobs (agent_session_id) WHERE state IN ('claimed', 'submitted');

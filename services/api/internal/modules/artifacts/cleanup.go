@@ -48,16 +48,23 @@ func cleanupExpiredArtifacts(ctx context.Context, pool *pgxpool.Pool, artifactRo
 // Temporary objects are never business references and can be removed after a
 // day, independently of the shorter TTL for completed unbound uploads.
 func cleanupTemporaryObjects(root string, olderThan int64) {
-	entries, err := os.ReadDir(root)
+	dir, err := os.Open(root)
 	if err != nil {
 		return
 	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".upload-") {
-			info, err := entry.Info()
-			if err == nil && info.ModTime().Unix() < olderThan {
-				os.Remove(filepath.Join(root, entry.Name()))
+	defer dir.Close()
+	for {
+		entries, readErr := dir.ReadDir(256)
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".upload-") {
+				info, err := entry.Info()
+				if err == nil && info.ModTime().Unix() < olderThan {
+					_ = os.Remove(filepath.Join(root, entry.Name()))
+				}
 			}
+		}
+		if readErr != nil {
+			return
 		}
 	}
 }

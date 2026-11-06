@@ -23,6 +23,7 @@ message RegisterAgentRequest {
   string partition = 2;
   reserved 3;
   reserved "total_nodes";
+  soj.v1.AgentExecutor executor = 4;
 }
 message RegisterAgentResponse {
   reserved 3;
@@ -59,12 +60,12 @@ message ReportJobRequest {
   string agent_session_id = 1;
   int64 job_id = 2;
   soj.v1.JobState state = 3;
-  optional string slurm_job_id = 4;
+  optional string execution_id = 4;
   google.protobuf.Timestamp observed_at = 5;
 }
 message ReportJobResponse {
   soj.v1.JobState state = 1;
-  optional string slurm_job_id = 2;
+  optional string execution_id = 2;
   reserved 3;
   reserved "terminal";
 }
@@ -74,7 +75,7 @@ message CompleteJobRequest {
   reserved "verdict", "score", "status_message";
   string agent_session_id = 1;
   int64 job_id = 2;
-  soj.v1.SlurmTerminalState slurm_terminal_state = 6;
+  soj.v1.ExecutionTerminalState execution_terminal_state = 6;
   optional int64 result_artifact_id = 7;
   optional int64 log_artifact_id = 8;
   reserved 9;

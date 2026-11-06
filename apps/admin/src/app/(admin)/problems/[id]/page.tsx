@@ -237,11 +237,11 @@ export default function EditProblemPage() {
           ) : (
             <p className="mt-3 text-sm text-warning-600 dark:text-warning-400">尚未上传测评包，不能创建可评测的提交。</p>
           )}
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          <p className="mt-1 break-words text-sm text-gray-500 dark:text-gray-400">
             {problemPackageHint(id)}
           </p>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            可领取分区：{form.partitions.length ? form.partitions.join(", ") : "未设置"}。Judge Agent 的 agent_partition 必须匹配其中一项。
+            可领取分区：{form.partitions.length ? form.partitions.join(", ") : "未设置"}。Judge Agent 的 agent_partition 必须匹配其中一项，agent_executor 必须与包类型一致；Docker 和 Slurm 使用不同分区。
           </p>
           <FileInput
             id="package"

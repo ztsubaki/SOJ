@@ -31,14 +31,14 @@ func TestJudgeProtocolIntegration(t *testing.T) {
 	}
 	defer pool.Close()
 	const agent = "11111111-1111-4111-8111-111111111111"
-	for _, q := range []string{`UPDATE judge_jobs SET state='pending',agent_session_id=NULL,assigned_partition=NULL,result_artifact_id=NULL,log_artifact_id=NULL,verdict=NULL,score=NULL,message=NULL,finished_at=NULL,cancel_requested_at=NULL,slurm_job_id=NULL,slurm_terminal_state=NULL WHERE id=100`, `DELETE FROM artifacts WHERE upload_job_id=100`, `UPDATE agent_sessions SET offline_at=now(),ended_at=now() WHERE partition='integration'`, `DELETE FROM agent_sessions WHERE id='11111111-1111-4111-8111-111111111111'`} {
+	for _, q := range []string{`UPDATE judge_jobs SET state='pending',agent_session_id=NULL,assigned_partition=NULL,result_artifact_id=NULL,log_artifact_id=NULL,verdict=NULL,score=NULL,message=NULL,finished_at=NULL,cancel_requested_at=NULL,execution_id=NULL,execution_terminal_state=NULL WHERE id=100`, `DELETE FROM artifacts WHERE upload_job_id=100`, `UPDATE agent_sessions SET offline_at=now(),ended_at=now() WHERE partition='integration'`, `DELETE FROM agent_sessions WHERE id='11111111-1111-4111-8111-111111111111'`} {
 		if _, err = pool.Exec(ctx, q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	s := NewControlServer(pool, t.TempDir(), "service-token")
-	registered, err := s.RegisterAgent(ctx, &judgev1.RegisterAgentRequest{AgentSessionId: agent, Partition: "integration"})
-	if err != nil || registered.GetSession().GetState() != sojv1.AgentState_AGENT_STATE_ONLINE {
+	registered, err := s.RegisterAgent(ctx, &judgev1.RegisterAgentRequest{AgentSessionId: agent, Partition: "integration", Executor: sojv1.AgentExecutor_AGENT_EXECUTOR_SLURM})
+	if err != nil || registered.GetSession().GetState() != sojv1.AgentState_AGENT_STATE_ONLINE || registered.GetSession().GetExecutor() != sojv1.AgentExecutor_AGENT_EXECUTOR_SLURM {
 		t.Fatalf("register=%v %v", registered, err)
 	}
 	var wg sync.WaitGroup
@@ -69,7 +69,7 @@ func TestJudgeProtocolIntegration(t *testing.T) {
 			t.Fatal("concurrent claim changed assignment")
 		}
 	}
-	if assignment.GetJobId() != 100 {
+	if assignment.GetJobId() != 100 || assignment.GetExecutor() != sojv1.AgentExecutor_AGENT_EXECUTOR_SLURM {
 		t.Fatalf("assignment=%v", assignment)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE agent_sessions SET drain_requested_at=now() WHERE id=$1`, agent); err != nil {
@@ -79,8 +79,8 @@ func TestJudgeProtocolIntegration(t *testing.T) {
 	if err != nil || !proto.Equal(replay.Assignment, assignment) {
 		t.Fatalf("draining replay=%v %v", replay, err)
 	}
-	slurm := "12345"
-	if _, err = s.ReportJob(ctx, &judgev1.ReportJobRequest{AgentSessionId: agent, JobId: 100, State: sojv1.JobState_JOB_STATE_FINISHING, SlurmJobId: &slurm}); err != nil {
+	execution := "12345"
+	if _, err = s.ReportJob(ctx, &judgev1.ReportJobRequest{AgentSessionId: agent, JobId: 100, State: sojv1.JobState_JOB_STATE_FINISHING, ExecutionId: &execution}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/internal/v1/judge/jobs/100/artifacts?kind=judge_result", bytes.NewBufferString("archived bytes are not parsed by the Control Plane"))
@@ -102,7 +102,7 @@ func TestJudgeProtocolIntegration(t *testing.T) {
 	if err = os.Remove(filepath.Join(s.artifactRoot, strconv.FormatInt(archive.ArtifactID, 10))); err != nil {
 		t.Fatal(err)
 	}
-	completed, err := s.CompleteJob(ctx, &judgev1.CompleteJobRequest{AgentSessionId: agent, JobId: 100, FinishedAt: timestamppb.Now(), SlurmTerminalState: sojv1.SlurmTerminalState_SLURM_TERMINAL_STATE_COMPLETED, ResultArtifactId: &archive.ArtifactID, Result: &judgev1.StructuredResult{Verdict: sojv1.Verdict_VERDICT_ACCEPTED, Score: "815.4"}})
+	completed, err := s.CompleteJob(ctx, &judgev1.CompleteJobRequest{AgentSessionId: agent, JobId: 100, FinishedAt: timestamppb.Now(), ExecutionTerminalState: sojv1.ExecutionTerminalState_EXECUTION_TERMINAL_STATE_COMPLETED, ResultArtifactId: &archive.ArtifactID, Result: &judgev1.StructuredResult{Verdict: sojv1.Verdict_VERDICT_ACCEPTED, Score: "815.4"}})
 	if err != nil || completed.State != sojv1.JobState_JOB_STATE_COMPLETED {
 		t.Fatalf("complete=%v %v", completed, err)
 	}
@@ -136,7 +136,7 @@ func TestStaleAgentCannotReviveIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := NewControlServer(pool, t.TempDir(), "token")
-	if _, err = s.RegisterAgent(ctx, &judgev1.RegisterAgentRequest{AgentSessionId: agent, Partition: "stale-test"}); err != nil {
+	if _, err = s.RegisterAgent(ctx, &judgev1.RegisterAgentRequest{AgentSessionId: agent, Partition: "stale-test", Executor: sojv1.AgentExecutor_AGENT_EXECUTOR_SLURM}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE agent_sessions SET last_heartbeat_at=$2 WHERE id=$1`, agent, time.Now().Add(-time.Minute)); err != nil {
@@ -145,7 +145,7 @@ func TestStaleAgentCannotReviveIntegration(t *testing.T) {
 	if _, err = s.ReportAgentStatus(ctx, &judgev1.ReportAgentStatusRequest{AgentSessionId: agent}); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("stale heartbeat=%v", err)
 	}
-	v, err := s.RegisterAgent(ctx, &judgev1.RegisterAgentRequest{AgentSessionId: agent, Partition: "stale-test"})
+	v, err := s.RegisterAgent(ctx, &judgev1.RegisterAgentRequest{AgentSessionId: agent, Partition: "stale-test", Executor: sojv1.AgentExecutor_AGENT_EXECUTOR_SLURM})
 	if err != nil || v.Session.State != sojv1.AgentState_AGENT_STATE_OFFLINE {
 		t.Fatalf("stale register=%v %v", v, err)
 	}

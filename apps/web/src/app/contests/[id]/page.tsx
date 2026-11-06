@@ -15,7 +15,7 @@ export default async function ContestDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="min-h-screen bg-base-200 text-base-content">
-      <ContestDetail contest={contest} registrationState={contest.registrationState} />
+      <ContestDetail key={contest.id} contest={contest} registrationState={contest.registrationState} />
     </div>
   );
 }

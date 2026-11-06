@@ -82,7 +82,8 @@ func (s *PublicGRPCServer) GetLeaderboard(ctx context.Context, req *sojv1.GetLea
 	if contest.Status != "running" && contest.Status != "ended" {
 		return nil, status.Error(codes.NotFound, "leaderboard is unavailable")
 	}
-	items, _, err := s.service.Leaderboard(ctx, req.GetContestId(), false, 1, 1000000)
+	p, n := rpcutil.Pagination(req.GetPage())
+	items, total, err := s.service.Leaderboard(ctx, req.GetContestId(), false, p, n)
 	if err != nil {
 		return nil, publicError(err)
 	}
@@ -90,7 +91,7 @@ func (s *PublicGRPCServer) GetLeaderboard(ctx context.Context, req *sojv1.GetLea
 	for _, item := range items {
 		out = append(out, protoLeaderboardEntry(item))
 	}
-	return &sojv1.GetLeaderboardResponse{Items: out}, nil
+	return &sojv1.GetLeaderboardResponse{Items: out, Page: &sojv1.PageMeta{Page: int32(p), PageSize: int32(n), Total: int64(total)}}, nil
 }
 func (s *PublicGRPCServer) ListContestProblems(ctx context.Context, req *sojv1.ListContestProblemsRequest) (*sojv1.ListContestProblemsResponse, error) {
 	if err := rpcauth.RequireCaller(ctx, rpcauth.CallerWebBFF); err != nil {

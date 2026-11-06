@@ -49,11 +49,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
-    try {
-      await authApi.logout();
-    } finally {
-      setUser(null);
-    }
+    await authApi.logout();
+    setUser(null);
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {

@@ -95,6 +95,9 @@ func Run(ctx context.Context) error {
 	}
 	grpcServer := grpc.NewServer(grpcOptions...)
 	artifactRoot := serverconfig.String("ARTIFACT_ROOT", "data/artifacts")
+	if err := ensureArtifactRootWritable(artifactRoot); err != nil {
+		return err
+	}
 	judgeControl := judge.NewControlServer(databasePool, artifactRoot, agentToken)
 	judgeControl.SetMaxArtifactSize(serverconfig.Megabytes("MAX_AGENT_ARTIFACT_SIZE_MB", judge.DefaultMaxAgentArtifactSize))
 	judgev1.RegisterJudgeControlServiceServer(grpcServer, judgeControl)
@@ -185,6 +188,27 @@ func Run(ctx context.Context) error {
 	case <-grpcDone:
 	case <-shutdownCtx.Done():
 		grpcServer.Stop()
+	}
+	return nil
+}
+
+// ensureArtifactRootWritable fails startup before an upload reaches Gin when
+// the local Artifact backend has been mounted with unsuitable permissions.
+func ensureArtifactRootWritable(root string) error {
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return fmt.Errorf("create ARTIFACT_ROOT %q: %w", root, err)
+	}
+	probe, err := os.CreateTemp(root, ".write-probe-*")
+	if err != nil {
+		return fmt.Errorf("ARTIFACT_ROOT %q is not writable: %w", root, err)
+	}
+	name := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("close ARTIFACT_ROOT write probe: %w", err)
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("remove ARTIFACT_ROOT write probe: %w", err)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import {
   getContestProblem,
   getSubmission,
   listContestSubmissions,
+  listLeaderboard,
   listParticipants,
   type Page,
   type Participant,
@@ -26,7 +27,6 @@ import type {
 } from "@/lib/server/bff";
 type ContestDetail = Contest & {
   problems: Problem[];
-  leaderboard: { items: LeaderboardEntry[] };
 };
 type ContestProblem = Problem;
 type ModalTab = "description" | "submit";
@@ -64,18 +64,6 @@ function getDifficultyBadge(difficulty: string) {
   return "badge-warning";
 }
 
-function problemScoreTextColor(scoreText: string, maximum: number) {
-  const score = Number(scoreText);
-  if (!Number.isFinite(score) || score <= 0 || maximum <= 0) {
-    return "text-base-content/50";
-  }
-  const ratio = score / maximum;
-  if (ratio >= 1) return "text-success";
-  if (ratio >= 0.75) return "text-primary";
-  if (ratio >= 0.5) return "text-info";
-  return "text-warning";
-}
-
 export function ContestDetail({
   contest,
   registrationState,
@@ -101,6 +89,11 @@ export function ContestDetail({
   const [submissionPage, setSubmissionPage] = useState(1);
   const [participants, setParticipants] = useState<Page<Participant> | null>(null);
   const [participantPage, setParticipantPage] = useState(1);
+  const [leaderboardResult, setLeaderboardResult] = useState<Page<LeaderboardEntry> | null>(null);
+  const [leaderboardPage, setLeaderboardPage] = useState(1);
+  const [leaderboardError, setLeaderboardError] = useState("");
+  const [leaderboardRevision, setLeaderboardRevision] = useState(0);
+  const leaderboard = leaderboardResult?.page === leaderboardPage ? leaderboardResult : null;
   const problemDialogRef = useRef<HTMLDialogElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const status = contest.status as keyof typeof statusLabels;
@@ -114,21 +107,9 @@ export function ContestDetail({
   const leaderboardProblemIDs =
     contest.problems.length > 0
       ? contest.problems.map((problem) => problem.id)
-      : (contest.leaderboard.items[0]?.problemScores ?? []).map(
+      : (leaderboard?.items[0]?.problemScores ?? []).map(
           (item) => item.problemId,
         );
-  const maximumScoreByProblemID = new Map<number, number>();
-  for (const row of contest.leaderboard.items) {
-    for (const problemScore of row.problemScores) {
-      const score = Number(problemScore.score);
-      if (Number.isFinite(score)) {
-        maximumScoreByProblemID.set(
-          problemScore.problemId,
-          Math.max(maximumScoreByProblemID.get(problemScore.problemId) ?? 0, score),
-        );
-      }
-    }
-  }
 
   useEffect(() => {
     if (selectedProblem) {
@@ -149,6 +130,25 @@ export function ContestDetail({
       setActionError(reason instanceof Error ? reason.message : "读取参赛者失败"),
     );
   }, [activeTab, contest.id, joined, participantPage]);
+
+  useEffect(() => {
+    if (activeTab !== "standings" || status === "upcoming") return;
+    const controller = new AbortController();
+    let active = true;
+    void listLeaderboard(contest.id, leaderboardPage, controller.signal)
+      .then((result) => {
+        if (!active) return;
+        setLeaderboardResult(result);
+        setLeaderboardError("");
+      })
+      .catch((reason) => {
+        if (active) setLeaderboardError(reason instanceof Error ? reason.message : "读取排行榜失败");
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activeTab, contest.id, leaderboardPage, leaderboardRevision, status]);
 
   async function openProblem(problem: ContestProblem) {
     setActionError(null);
@@ -189,6 +189,7 @@ export function ContestDetail({
       await registerForContest(contest.id);
       setJoined(true);
       setActionMessage("报名成功");
+      router.refresh();
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : "报名失败");
     } finally {
@@ -381,6 +382,18 @@ export function ContestDetail({
           <section className="card rounded-box bg-base-100 shadow-md">
             <div className="card-body p-5 sm:p-6">
               <h2 className="card-title mb-3">排行榜</h2>
+              {leaderboardError && (
+                <div className="alert alert-error sm:alert-horizontal" role="alert">
+                  <span>{leaderboardError}</span>
+                  <button type="button" className="btn btn-sm" onClick={() => {
+                    setLeaderboardError("");
+                    setLeaderboardRevision((revision) => revision + 1);
+                  }}>重试</button>
+                </div>
+              )}
+              {!leaderboard && !leaderboardError && (
+                <span className="loading loading-spinner loading-sm" aria-label="正在读取排行榜" />
+              )}
               <div className="overflow-x-auto">
                 <table className="table table-md table-zebra">
                   <thead>
@@ -396,7 +409,7 @@ export function ContestDetail({
                     </tr>
                   </thead>
                   <tbody>
-                    {contest.leaderboard.items.map((row) => {
+                    {(leaderboard?.items ?? []).map((row) => {
                       const scores = new Map(
                         row.problemScores.map((item) => [item.problemId, item.score]),
                       );
@@ -413,7 +426,7 @@ export function ContestDetail({
                               <td className="text-right" key={problemID}>
                                 <span
                                   aria-label={`题目 ${index + 1} 得分 ${score}`}
-                                  className={`font-mono font-medium tabular-nums ${problemScoreTextColor(score, maximumScoreByProblemID.get(problemID) ?? 0)}`}
+                                  className={`font-mono font-medium tabular-nums ${Number(score) === 0 ? "text-base-content/50" : ""}`}
                                 >
                                   {score}
                                 </span>
@@ -427,6 +440,16 @@ export function ContestDetail({
                   </tbody>
                 </table>
               </div>
+              {leaderboardResult && (
+                <Pagination
+                  page={leaderboardPage}
+                  total={leaderboardResult.total}
+                  onPageChange={(page) => {
+                    setLeaderboardError("");
+                    setLeaderboardPage(page);
+                  }}
+                />
+              )}
             </div>
           </section>
         )}

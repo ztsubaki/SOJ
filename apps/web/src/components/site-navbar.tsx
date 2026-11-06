@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth-provider";
 import { ThemeControls } from "@/components/theme-controls";
 import { usePlatformName } from "@/components/platform-name-provider";
+import { useToast } from "@/components/toast-provider";
 
 const navigation = [
   { href: "/", label: "首页" },
@@ -17,12 +19,21 @@ export function SiteNavbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { isLoading, signOut, user } = useAuth();
+  const { show } = useToast();
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const isActive = (href: string) =>
     href === "/" ? pathname === href : pathname.startsWith(href);
 
   async function handleSignOut() {
-    await signOut();
-    router.replace("/login");
+    setIsSigningOut(true);
+    try {
+      await signOut();
+      router.replace("/login");
+    } catch (reason) {
+      show(reason instanceof Error ? `退出失败：${reason.message}` : "退出失败，请稍后重试。", "error");
+    } finally {
+      setIsSigningOut(false);
+    }
   }
 
   return (
@@ -68,8 +79,8 @@ export function SiteNavbar() {
           {!isLoading && (user ? (
             <>
               <span className="hidden text-sm font-medium sm:inline">{user.username}</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={handleSignOut}>
-                退出
+              <button type="button" className="btn btn-ghost btn-sm" disabled={isSigningOut} onClick={() => void handleSignOut()}>
+                {isSigningOut ? "退出中..." : "退出"}
               </button>
             </>
           ) : (

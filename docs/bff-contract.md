@@ -49,6 +49,10 @@ JSON请求体固定上限为1 MiB（1,048,576 bytes），BFF在流式读取时�
 
 映射固定为：畸形JSON或缺失必要请求结构为`4000`；字段格式、取值及gRPC `InvalidArgument`为`4001`；注册邮箱域名未获允许时，Control Plane以固定的`InvalidArgument` status message返回，BFF映射为`4002`；`AlreadyExists`为`4091`；`FailedPrecondition`为`4092`；`ResourceExhausted`为`4290`；其他未定义的gRPC错误统一映射`5000`。上传大小由流式HTTP端点直接返回`4130`。路由存在但method错误为`4050`，不支持的请求media type为`4150`。
 
+BFF按以下顺序处理业务请求：先检查Origin（保留logout例外），再匹配已声明路径、HTTP method，最后校验查询参数并进入业务handler。不存在的路径返回`4040`，包括未知`auth/*`路径及Admin不提供的注册/验证码路径；已存在路径使用不支持的method返回`4050`，不会因该请求同时含有非法query而改成`4001`。路径参数的数值格式在业务handler内校验，不参与路径存在性判断。
+
+`HEAD`按`GET`选择同一路由及查询字段，文件代理仍向上游发送`HEAD`且不下载文件body。查询白名单只适用于`GET/HEAD`；写操作没有query字段，未知或重复query均返回`4001`。成功、校验失败和异常响应均保持`no-store`；这些校验不替代Control Plane的最终认证授权。
+
 登录、注册和续期成功后设置host-only `soj_session` Cookie：`HttpOnly`、`SameSite=Lax`、`Path=/`，生产默认`Secure`。仅本地HTTP调试可设置server-only `SESSION_COOKIE_SECURE=false`关闭该属性；正式部署不得设置它。Cookie值为独立生成的随机UUID；Control Plane只保存其SHA-256 hash，Cookie不包含数据库session ID。Cookie Max-Age/Expires与Control Plane返回的session过期时间一致，Web与Admin各自在自己的host作用域设置同名Cookie。续期成功必须用新token替换同名Cookie并同步Max-Age/Expires。注销撤销当前session并清除当前host Cookie。全部认证响应使用`Cache-Control: no-store`；token不得出现在JSON、日志或前端存储中。续期失败或普通401响应不得无条件清除Cookie，避免删除并发请求已设置的新token。
 
 ## 共享对象
@@ -144,7 +148,7 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 | `GET /api/v1/contests/:id` | public | 无 | `Contest` | hidden比赛对公开接口为`4040`。 |
 | `GET /api/v1/contests/:id/problems` | 按比赛阶段 | 无 | `ProblemSummary[]` | 不分页，只返回当前关联赛题；每项的`runnable`表示题目当前启用、存在available测评包且有候选分区。hidden或赛前为`4040`，赛中要求有效user session且已报名，并隐藏disabled题目；ended后当前关联题目公开（包括disabled）。取消资格不撤销读取权限。 |
 | `GET /api/v1/contests/:id/problems/:problemId` | 按比赛阶段 | 无 | `PublicProblem` | 与题目列表相同授权，并包含同一派生`runnable`字段；关系已移除或题目按当前规则隐藏时为`4040`，不恢复历史关联。 |
-| `GET /api/v1/contests/:id/leaderboard` | public，赛中/赛后 | 无 | `{items: LeaderboardEntry[]}` | 不分页；赛前为`4040`。Entry为`{rank,user:{id,username},score:Decimal,problemScores:[{problemId,score:Decimal}],solved,submissions,disqualified:false,lastSubmission:Timestamp|null}`；`problemScores`按当前比赛题目顺序完整列出，每题没有有效得分时为`0`。 |
+| `GET /api/v1/contests/:id/leaderboard` | public，赛中/赛后 | 分页 | `PageResult<LeaderboardEntry>` | 赛前为`4040`；`rank`在全部有资格参赛者上计算，不按页重新编号。Entry为`{rank,user:{id,username},score:Decimal,problemScores:[{problemId,score:Decimal}],solved,submissions,disqualified:false,lastSubmission:Timestamp|null}`；`problemScores`按当前比赛题目顺序完整列出，每题没有有效得分时为`0`。 |
 | `GET /api/v1/contests/:id/participants` | user | 分页 | `PageResult<{user:{id,username},registeredAt}>` | 仅已报名用户和Admin可读；不返回email或取消资格标记。 |
 | `POST /api/v1/contests/:id/registration` | user | 空body | `201 {contestId,registeredAt}` | 仅visible且未结束；重复为`4091`。 |
 | `GET /api/v1/submissions` | user | `contestId`、`problemId`、`status`、分页 | `PageResult<Submission>` | 仅调用者自己的`contest` Submission；所有筛选可选。比赛内个人提交使用`contestId`筛选，不另设比赛专用列表端点。 |
@@ -196,6 +200,23 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 
 创建或更新Contest赛题列表时，当前公开Problem不得新增为未结束比赛的保密题，违反返回`4092`；判断使用写事务中的当前公开谓词，不查询公开历史。比赛结束后赛题列表及顺序固定，不能移除ended Contest的关联。
 
+测评包上传支持 Slurm 和 Docker 两种格式，均为 `.tar.zst`，解包根目录含普通文件 `manifest.json` 与对应脚本。Slurm 包含根目录 `judge.sbatch`，manifest 为 `{"schemaVersion":1,"problemId":1}`。Docker 包包含根目录 `judge.sh`，manifest 示例为：
+
+```json
+{
+  "schemaVersion": 1,
+  "problemId": 1,
+  "docker": {
+    "image": "judge-image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "cpus": 1,
+    "memoryMb": 128,
+    "timeLimitSeconds": 10
+  }
+}
+```
+
+将 `problemId` 替换为当前题目 ID，将示例镜像摘要替换为部署时预加载镜像的真实摘要。`image` 也可使用 `sha256:` 加 64 位小写十六进制的本地镜像 ID；镜像引用必须无空白且锁定摘要，不会自动拉取。`cpus` 为 1–256 的整数，`memoryMb` 为 16–1048576 的整数（MiB），`timeLimitSeconds` 为 1–86400 的整数。`docker` 可省略（表示 Slurm），存在时必须是非 null 对象，四个字段缺一不可；manifest 及 docker 配置不接受未知字段。Docker 固定使用 `/bin/sh /judge/package/judge.sh`，镜像须含 `/bin/sh`。Agent 的分区及 executor 必须同时匹配 Job；两种 executor 使用不同分区。上传格式校验由 Control Plane 完成，失败不会替换已有测评包。
+
 `Job`为：
 
 ```json
@@ -205,13 +226,14 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
   "state": "completed",
   "cancelRequestedAt": null,
   "agentSessionId": "agent-session-001",
-  "slurmJobId": "12345",
+  "executionId": "12345",
   "executionSnapshot": {
     "packageArtifactId": 1,
     "packageSha256": "hex-sha256",
     "manifest": { "schemaVersion": 1, "problemId": 1 },
     "eligiblePartitions": ["judge", "gpu-judge"],
-    "assignedPartition": "judge"
+    "assignedPartition": "judge",
+    "executor": "slurm"
   },
   "verdict": "accepted",
   "score": "815.4",
@@ -226,9 +248,9 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 }
 ```
 
-`executionSnapshot`仅在Admin Job历史中出现，在所有Job状态下必填；manifest遵循JSON Schema。claim前`agentSessionId`和`executionSnapshot.assignedPartition`为null，claim后不可变。不返回资源请求或用量字段。
+`executionSnapshot`仅在Admin Job历史中出现，在所有Job状态下必填；manifest遵循JSON Schema。`executionSnapshot.executor`必填且固定为`slurm|docker`，由不可变manifest决定：有docker配置为docker，否则为slurm，claim前也必须返回。claim前`agentSessionId`和`executionSnapshot.assignedPartition`为null，claim后不可变。不额外返回资源请求或用量字段；Docker固定执行限制保留在manifest.docker中。
 
-`cancelRequestedAt`是首次取消意图时间或null，不改变state。不存在的时间、结果、日志、Slurm Job ID、verdict、score和statusMessage为null。测评的verdict、score和statusMessage来自Agent上报并由Control Plane保存的结构化结果，其中result.message映射为statusMessage；原始result Artifact只归档；Slurm TIMEOUT/OOM无result Artifact。状态语义见[`state-machines.md`](state-machines.md)。
+`cancelRequestedAt`是首次取消意图时间或null，不改变state。不存在的时间、结果、日志、`executionId`、verdict、score和statusMessage为null。`executionId`为字符串：Slurm Job ID或Docker实际container ID，不转为JSON number，不提供旧执行ID字段别名。测评的verdict、score和statusMessage来自Agent上报并由Control Plane保存的结构化结果，其中result.message映射为statusMessage；原始result Artifact只归档；Slurm和Docker的TIMEOUT/OOM均无result Artifact。状态语义见[`state-machines.md`](state-machines.md)。
 
 ### AgentSession
 
@@ -238,6 +260,7 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 {
   "id": "uuid",
   "partition": "judge",
+  "executor": "slurm",
   "state": "online",
   "workload": "queued",
   "activeJobCount": 2,
@@ -250,7 +273,7 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 }
 ```
 
-`state`为`online|draining|ended|offline`，`workload`为`empty|no_queue|queued`；状态、派生条件和转换规则见[`state-machines.md`](state-machines.md#agent-session)。`lastHeartbeatAt`注册后必填；`drainRequestedAt`首次drain前为null，`endedAt`进入ended/offline前为null，首次写入后不变。
+`executor`必填且固定为`slurm|docker`，注册后不可改变；同一分区使用同一种executor。`state`为`online|draining|ended|offline`，`workload`为`empty|no_queue|queued`；状态、派生条件和转换规则见[`state-machines.md`](state-machines.md#agent-session)。`lastHeartbeatAt`注册后必填；`drainRequestedAt`首次drain前为null，`endedAt`进入ended/offline前为null，首次写入后不变。
 
 以下三个字段均为必填非负整数，由Control Plane按请求从该session拥有的Job查询派生，不持久化、不缓存，也不由Agent上报：
 
@@ -267,6 +290,8 @@ Problem公开判定、比赛修改窗口与访问权限以[`api.md`](api.md#比�
 BFF服务凭据通过`authorization` gRPC metadata传递，用户会话token通过`x-soj-session`传递，详见[内部协议](protocols.md)。`SendRegistrationEmailVerification`接收username和email，并映射可用性及`resend_after_seconds`为`usernameAvailable`、`emailAvailable`和`resendAfterSeconds`，绝不返回验证码。`Register`、`Login`和`RefreshSession`返回新`session_token`与`expires_at`；token只供BFF设置Cookie，绝不序列化到Browser JSON，到期时间显式映射为`expiresAt`。`GetCurrentUser`返回User和当前session的`expires_at`。注册、登录和读取身份映射为`AuthSession`，续期映射为`{expiresAt}`；不映射root或强制改密字段，不能通过前端猜测到期时间补齐契约。
 
 BFF使用显式映射而不是Protobuf JSON自动序列化：HTTP lowerCamelCase映射Proto snake_case；Proto `*_UNSPECIFIED`不得输出；HTTP可空字段由optional/message presence映射为显式`null`；repeated映射为空数组；RPC列表的`items + PageMeta page`展开为HTTP扁平`PageResult`。HTTP path参数按各RPC请求字段映射，例如恢复资格的`:id/:userId`映射为`RestoreParticipantRequest.contest_id/user_id`。
+
+`AgentSession.executor`与`Job.executionSnapshot.executor`只显式接受`AGENT_EXECUTOR_SLURM`和`AGENT_EXECUTOR_DOCKER`并投影为`slurm`和`docker`；缺失、UNSPECIFIED或未知枚举值为Control Plane协议错误，由既有dispatcher统一返回`5000`，不伪装成Slurm、不输出null或原始未知值。此变更不改变权限、统一dispatcher或`no-store`策略。
 
 | 服务 | RPC |
 |---|---|

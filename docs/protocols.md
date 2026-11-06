@@ -24,11 +24,15 @@ Control Plane、Web/Admin BFF及Judge Agent的gRPC发送和接收消息上限统
 
 文件执行契约见[`judge.md`](judge.md)，assignment字段见[`judge-contract.md`](judge-contract.md)。
 
-Proto以`int64`承载数据库分配的User、Contest、Problem、Submission、Job和Artifact ID；BFF在Browser JSON中映射为安全的正整数。Agent session 是 UUID 字符串；Slurm Job ID、partition、token和URL保持字符串。BFF必须显式映射分页、enum和presence，不使用Protobuf JSON直接透传。
+Proto以`int64`承载数据库分配的User、Contest、Problem、Submission、Job和Artifact ID；BFF在Browser JSON中映射为安全的正整数。Agent session是UUID字符串；执行ID、partition、token和URL保持字符串。`execution_id`是Slurm Job ID或Docker container ID；`ExecutionTerminalState`是后端归一化终态，不把Docker标识伪装为Slurm字段。BFF必须显式映射分页、enum和presence，不使用Protobuf JSON直接透传。
 
 `LeaderboardEntry.problem_scores`按当前比赛题目顺序完整返回每题派生分数。每项使用Problem ID关联赛题、使用精确Decimal字符串承载分数；其计算规则与`LeaderboardEntry.score`相同，没有有效得分时为0。
 
+`ContestService.GetLeaderboard`接受`PageRequest page`并返回`PageMeta page`，不再请求或返回整场榜单。名次仍在整场有资格参赛者上计算，分页只限制本次响应的条目。Web、Control Plane和生成绑定随本次协议切换同步升级，不保留全量响应别名。
+
 `ProblemSummary.runnable`及比赛上下文`Problem.runnable`表示题目当前是否具备创建新Job的必要条件：启用、具备available的测评包，并至少有一个候选分区。该字段仅用于展示；Control Plane在提交前及写事务中仍重新校验。
+
+`AgentExecutor`仅使用`SLURM/DOCKER`，注册时必须显式指定；session类型不可修改。AgentSession、JobAssignment和JobExecutionSnapshot都携带executor，Job类型由不可变manifest派生，不另存可漂移的类型副本。Claim同时匹配executor与partition。Docker资源配置属于manifest快照，不新增资源RPC、资源表或遥测。
 
 ## 服务
 
@@ -70,19 +74,21 @@ BFF按[`bff-contract.md`](bff-contract.md)映射HTTP错误，Browser不得解析
 - 证书、私钥、CA和服务token只通过Secret或挂载文件提供。
 - Browser登录、续期、注销、改密和角色生命周期以[`api.md`](api.md)为准；session表示、存储和并发事务以[`database.md`](database.md)为准，本文不重复定义。Cookie与传输适配见[`bff-contract.md`](bff-contract.md)。BFF服务凭据与用户session分离，服务身份不能代替用户授权；Browser session不是Agent凭据。
 
-Agent生命周期、workload、claim与终态规则见[`state-machines.md`](state-machines.md)，RPC请求/响应语义见[`judge-contract.md`](judge-contract.md)，Browser展示见[`bff-contract.md`](bff-contract.md)。`ClaimJobs`在无assignment时还返回尽力而为的全局pending数和当前partition可领取pending数，Agent将其限频输出，仅用于区分无任务、分区不匹配和可能被并发Agent暂时占用的情形，不能作为调度状态机输入。
+Agent生命周期、workload、claim与终态规则见[`state-machines.md`](state-machines.md)，RPC请求/响应语义见[`judge-contract.md`](judge-contract.md)，Browser展示见[`bff-contract.md`](bff-contract.md)。`ClaimJobs`在无assignment时还返回尽力而为的全局pending数和当前partition及executor匹配的pending数，Agent将其限频输出；这些计数不能作为调度状态机输入。
 
 结构化测评结果由Agent在Schema校验后通过CompleteJob上报；Control Plane只对原始结果做归档，不解析文件。结果字段、传输校验及终态规则见[`judge-contract.md`](judge-contract.md#completejob)。所有动态RPC查询结果不缓存，遵循[`architecture.md`](architecture.md#动态数据)。
 
 ## Artifact
 
-大文件使用认证流式HTTP。BFF与Agent的精确端点、header、完整性验证及错误分别由[`bff-contract.md`](bff-contract.md#内部流式http)和[`judge-contract.md`](judge-contract.md#artifact-http)定义；临时对象、pending与最终绑定由[`state-machines.md`](state-machines.md#artifact)及[`database.md`](database.md#artifact)定义。
+大文件使用认证流式HTTP。BFF与Agent的精确端点、header、完整性验证、传输时限及错误分别由[`bff-contract.md`](bff-contract.md#内部流式http)和[`judge-contract.md`](judge-contract.md#artifact-http)定义；临时对象、pending与最终绑定由[`state-machines.md`](state-machines.md#artifact)及[`database.md`](database.md#artifact)定义。
 
 ## 升级
 
 使用Buf执行构建、lint和代码生成。字段号不得复用，删除字段必须`reserved`。
 
 第一版不支持协议协商、滚动兼容或多版本并行。升级顺序为：drain Agent，停止应用，执行经审查的数据库SQL，部署全部组件，依次启动Control Plane、Web/Admin和Agent。回退由运维人工判断。
+
+Docker Agent升级要求人工执行[`20261105_docker_agent_executor.sql`](../services/api/migrations/20261105_docker_agent_executor.sql)，为既有session填充slurm类型，并将Job存储列改名为execution_id/execution_terminal_state。所有服务、生成绑定和Browser消费者同步切换到通用执行字段；不保留旧Slurm字段别名。既有Slurm包及其不可变Job manifest无需改写。
 
 ### SSR 报名状态
 

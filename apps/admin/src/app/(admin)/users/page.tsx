@@ -2,7 +2,6 @@
 import Panel from "@/components/ui/Panel";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import Badge from "@/components/ui/badge/Badge";
 import Button from "@/components/ui/button/Button";
 import {
@@ -16,29 +15,11 @@ import type { UserDetail } from "@/lib/admin-types";
 import { roleColor, statusColor } from "@/lib/presentation";
 import { listUsers } from "@/lib/users-api";
 import { ToastMessage } from "@/context/ToastContext";
+import Pagination from "@/components/ui/Pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<UserDetail[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    listUsers()
-      .then((page) => {
-        if (active) setUsers(page.items);
-      })
-      .catch((reason) => {
-        if (active)
-          setError(reason instanceof Error ? reason.message : "读取用户失败");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { items: users, page, pageSize, total, loading, error, setPage } = usePaginatedQuery<UserDetail>("/admin/users", listUsers);
 
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
@@ -160,6 +141,7 @@ export default function UsersPage() {
             )}
             <ToastMessage message={error} />
           </div>
+          <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
         </Panel>
       </div>
     </div>

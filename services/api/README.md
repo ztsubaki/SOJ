@@ -23,6 +23,20 @@ the HTTP artifact/upload adaptation. `internal/modules/artifacts` owns expired
 pending and temporary object cleanup for both Browser and Agent uploads.
 All file operations use `ARTIFACT_ROOT` directly; its directory name is arbitrary.
 
+Submission query projections retain only fields consumed by their adapters;
+ownership predicates continue to use `submissions.user_id` in SQL. Business IDs
+are numeric and validated at their entry points; there is no shared opaque
+business-ID string validator.
+
+Registration-code expirations follow successful delivery order and are reaped
+lazily during later issuance. Generation checks prevent an old expiration from
+removing a reissued code; no per-code timers or goroutines are created. Existing
+TTL, cooldown and atomic-consumption rules remain unchanged.
+
+Temporary-object cleanup reads directory entries in bounded batches instead of
+loading and sorting the whole Artifact root. Admin Contest lists close their
+page cursor before loading Problem summaries in one batch query.
+
 Database schema changes are executed manually by operations staff during a planned maintenance window. Control Plane never applies, detects, or orchestrates schema changes at startup or runtime, and provides no schema change command.
 
 ```bash
@@ -53,7 +67,18 @@ and `runner`; both start with password `password`.
 > run those tests, point `DATABASE_URL` at an explicitly prepared disposable
 > database with the schema and integration seed applied.
 
-`schema.sql` defines the current database directly and is applied to an empty
-project database. No legacy schema or data conversion scripts are maintained.
+`schema.sql` defines the current database directly and is applied only to an
+empty project database. Existing databases use the reviewed manual SQL under
+`migrations/`; the index upgrade and its maintenance-window requirements are
+documented in [database operations](../../docs/database.md#schema与运维).
+The Docker executor upgrade is `migrations/20261105_docker_agent_executor.sql`:
+stop API and Agents before applying it. It marks existing sessions as Slurm and
+renames execution ID/terminal columns without rewriting their values. Sessions
+explicitly register `SLURM` or `DOCKER`; a session cannot change its executor.
+Claims match both the immutable package manifest's executor and eligible partition;
+Slurm and Docker Agents therefore use separate active partitions. Slurm packages
+require root `judge.sbatch`; Docker packages declare bounded immutable-image
+configuration in `manifest.json` and require root `judge.sh`.
+
 Administrators are assigned by database operations (`UPDATE users SET role='admin' ...`),
 never by an application bootstrap endpoint.

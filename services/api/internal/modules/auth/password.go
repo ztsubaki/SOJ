@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -86,8 +85,6 @@ func validPassword(password string) bool {
 	}
 	return true
 }
-
-var errInvalidPasswordHash = errors.New("invalid password hash")
 
 func passwordNeedsRehash(encoded string) bool {
 	parts := strings.Split(encoded, "$")

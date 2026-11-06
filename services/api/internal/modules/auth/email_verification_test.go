@@ -22,6 +22,25 @@ func (s *recordingRegistrationEmailSender) SendRegistrationEmailVerification(_ c
 	return nil
 }
 
+type blockingRegistrationEmailSender struct {
+	started chan string
+	finish  chan error
+}
+
+func (s *blockingRegistrationEmailSender) SendRegistrationEmailVerification(ctx context.Context, _ string, code string) error {
+	select {
+	case s.started <- code:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-s.finish:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func TestRegistrationEmailVerification(t *testing.T) {
 	sender := &recordingRegistrationEmailSender{}
 	service := &Service{emailSender: sender, emailVerifications: make(map[string]emailVerification)}
@@ -92,6 +111,144 @@ func TestRegistrationEmailVerificationExpires(t *testing.T) {
 	}}
 	if err := service.validRegistrationEmailVerification("runner@example.invalid", "123456"); !errors.Is(err, ErrEmailVerificationExpired) {
 		t.Fatalf("expired code = %v, want expired", err)
+	}
+}
+
+func TestRegistrationEmailVerificationOldExpirationDoesNotRemoveReissue(t *testing.T) {
+	service := &Service{
+		emailSender:        &recordingRegistrationEmailSender{},
+		emailVerifications: make(map[string]emailVerification),
+	}
+	const email = "runner@example.invalid"
+	if _, err := service.issueRegistrationEmailVerification(context.Background(), email); err != nil {
+		t.Fatalf("issue original verification: %v", err)
+	}
+	first := service.emailVerifications[email]
+	// Advance only this issuance's age without sleeping or changing the clock
+	// used by successful delivery. Its expiration still precedes the reissue.
+	first.sentAt = time.Now().Add(-2 * registrationEmailVerificationCooldown)
+	first.expiresAt = time.Now().Add(time.Minute)
+	service.emailVerifications[email] = first
+	service.emailVerificationExpirations[0].expiresAt = first.expiresAt
+	if _, err := service.issueRegistrationEmailVerification(context.Background(), email); err != nil {
+		t.Fatalf("reissue verification: %v", err)
+	}
+	second := service.emailVerifications[email]
+	service.verificationMu.Lock()
+	service.expireRegistrationEmailVerificationsLocked(first.expiresAt)
+	service.verificationMu.Unlock()
+	if got := service.emailVerifications[email]; got != second {
+		t.Fatalf("old expiration changed the new verification: got %+v, want %+v", got, second)
+	}
+	if err := service.consumeRegistrationEmailVerification(email, second.code); err != nil {
+		t.Fatalf("consume reissued code: %v", err)
+	}
+}
+
+func TestRegistrationEmailVerificationDeliveryPreservesConcurrentConsumption(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		deliveryErr error
+	}{
+		{name: "success"},
+		{name: "failure", deliveryErr: errors.New("SMTP unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			sender := &blockingRegistrationEmailSender{started: make(chan string), finish: make(chan error)}
+			const email = "runner@example.invalid"
+			sentAt := time.Now().Add(-2 * registrationEmailVerificationCooldown)
+			previous := emailVerification{code: "123456", sentAt: sentAt, expiresAt: sentAt.Add(registrationEmailVerificationTTL), generation: 1}
+			service := &Service{
+				emailSender:                 sender,
+				emailVerifications:          map[string]emailVerification{email: previous},
+				emailVerificationGeneration: 1,
+				emailVerificationExpirations: []emailVerificationExpiration{{
+					email: email, expiresAt: previous.expiresAt, generation: previous.generation,
+				}},
+			}
+			result := make(chan error, 1)
+			go func() {
+				_, err := service.issueRegistrationEmailVerification(ctx, email)
+				result <- err
+			}()
+			var deliveredCode string
+			select {
+			case deliveredCode = <-sender.started:
+			case <-ctx.Done():
+				t.Fatal("delivery did not start")
+			}
+			if _, err := service.issueRegistrationEmailVerification(ctx, email); !errors.Is(err, ErrEmailVerificationDelivery) {
+				t.Fatalf("concurrent delivery = %v, want delivery in progress", err)
+			}
+			if err := service.consumeRegistrationEmailVerification(email, previous.code); err != nil {
+				t.Fatalf("consume previous code during delivery: %v", err)
+			}
+			if err := service.consumeRegistrationEmailVerification(email, previous.code); !errors.Is(err, ErrEmailVerificationRequired) {
+				t.Fatalf("consume previous code twice = %v, want required", err)
+			}
+			select {
+			case sender.finish <- test.deliveryErr:
+			case <-ctx.Done():
+				t.Fatal("delivery did not finish")
+			}
+			var issueErr error
+			select {
+			case issueErr = <-result:
+			case <-ctx.Done():
+				t.Fatal("issuance did not finish")
+			}
+			if test.deliveryErr != nil {
+				if !errors.Is(issueErr, ErrEmailVerificationDelivery) {
+					t.Fatalf("failed issuance = %v, want delivery failure", issueErr)
+				}
+				if err := service.validRegistrationEmailVerification(email, previous.code); !errors.Is(err, ErrEmailVerificationRequired) {
+					t.Fatalf("failed delivery restored a consumed code: %v", err)
+				}
+				return
+			}
+			if issueErr != nil {
+				t.Fatalf("successful issuance: %v", issueErr)
+			}
+			if err := service.consumeRegistrationEmailVerification(email, deliveredCode); err != nil {
+				t.Fatalf("consume delivered code: %v", err)
+			}
+			if _, err := service.issueRegistrationEmailVerification(ctx, email); !errors.Is(err, ErrEmailVerificationRateLimited) {
+				t.Fatalf("resend after new-code consumption = %v, want rate limited", err)
+			}
+		})
+	}
+}
+
+func TestRegistrationEmailVerificationIsConsumedOnceConcurrently(t *testing.T) {
+	const email = "runner@example.invalid"
+	service := &Service{emailVerifications: map[string]emailVerification{
+		email: {code: "123456", expiresAt: time.Now().Add(registrationEmailVerificationTTL)},
+	}}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			results <- service.consumeRegistrationEmailVerification(email, "123456")
+		}()
+	}
+	close(start)
+	var consumed, required int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			consumed++
+		case errors.Is(err, ErrEmailVerificationRequired):
+			required++
+		default:
+			t.Fatalf("consume concurrently: %v", err)
+		}
+	}
+	if consumed != 1 || required != 1 {
+		t.Fatalf("concurrent consumption = %d successful, %d required; want one each", consumed, required)
 	}
 }
 

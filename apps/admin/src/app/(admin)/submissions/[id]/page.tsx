@@ -2,7 +2,7 @@
 import Panel from "@/components/ui/Panel";
 import { request } from "@soj/bff/client";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Button from "@/components/ui/button/Button";
 import Badge from "@/components/ui/badge/Badge";
 import {
@@ -15,7 +15,8 @@ import {
 import type { SubmissionDetail, SubmissionJob } from "@/lib/admin-types";
 import { verdictColor } from "@/lib/presentation";
 import { cancelSubmission, rejudgeSubmission } from "@/lib/submissions-api";
-import { allPages } from "@/lib/pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
+import Pagination from "@/components/ui/Pagination";
 import { ToastMessage } from "@/context/ToastContext";
 
 function canRejudge(status: SubmissionDetail["status"]) {
@@ -27,22 +28,24 @@ export default function SubmissionDetailPage() {
   const id = Number(decodeURIComponent(rawId));
   const router = useRouter();
   const [sub, setSub] = useState<SubmissionDetail | null>(null);
-  const [jobs, setJobs] = useState<SubmissionJob[]>([]);
+  const { items: jobs, page, pageSize, total, loading, error: jobsError, setPage, refresh } = usePaginatedQuery<SubmissionJob>(`/admin/submissions/${encodeURIComponent(id)}/jobs`);
+  const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const reload = useCallback(() => {
-    void Promise.all([
-      request<SubmissionDetail>(`/admin/submissions/${encodeURIComponent(id)}`),
-      allPages<SubmissionJob>(`/admin/submissions/${encodeURIComponent(id)}/jobs`),
-    ])
-      .then(([detail, history]) => {
-        setSub(detail);
-        setJobs(history);
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "无法读取提交"));
-  }, [id]);
-  useEffect(reload, [reload]);
-  if (!sub)
+  const reload = () => {
+    setRevision((value) => value + 1);
+    refresh();
+  };
+  useEffect(() => {
+    const controller = new AbortController();
+    void request<SubmissionDetail>(`/admin/submissions/${encodeURIComponent(id)}`, { signal: controller.signal })
+      .then((detail) => { if (!controller.signal.aborted) setSub(detail); })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "无法读取提交");
+      });
+    return () => controller.abort();
+  }, [id, revision]);
+  if (!sub || sub.id !== id)
     return (
       <Panel className="p-8 text-center">
         <ToastMessage message={error} />
@@ -149,7 +152,8 @@ export default function SubmissionDetailPage() {
                 <TableCell isHeader>状态</TableCell>
                 <TableCell isHeader>结果</TableCell>
                 <TableCell isHeader>诊断</TableCell>
-                <TableCell isHeader>Slurm</TableCell>
+                <TableCell isHeader>执行类型</TableCell>
+                <TableCell isHeader>执行 ID</TableCell>
                 <TableCell isHeader>创建时间</TableCell>
                 <TableCell isHeader>文件</TableCell>
               </TableRow>
@@ -166,7 +170,8 @@ export default function SubmissionDetailPage() {
                   <TableCell className="max-w-xl break-words">
                     {job.statusMessage ?? "-"}
                   </TableCell>
-                  <TableCell>{job.slurmJobId ?? "-"}</TableCell>
+                  <TableCell>{job.executionSnapshot.executor === "docker" ? "Docker" : "Slurm"}</TableCell>
+                  <TableCell className="max-w-xs break-all font-mono">{job.executionId ?? "-"}</TableCell>
                   <TableCell>
                     {job.createdAt
                       ? new Date(job.createdAt).toLocaleString("zh-CN")
@@ -201,7 +206,9 @@ export default function SubmissionDetailPage() {
             </TableBody>
           </Table>
         </div>
-        {jobs.length === 0 && <p className="mt-4 text-gray-500">暂无 Job 记录。</p>}
+        {!loading && !jobsError && jobs.length === 0 && <p className="mt-4 text-gray-500">暂无 Job 记录。</p>}
+        <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
+        <ToastMessage message={jobsError} />
       </Panel>
     </div>
   );

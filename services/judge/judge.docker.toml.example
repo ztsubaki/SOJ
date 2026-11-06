@@ -1,0 +1,17 @@
+# Copy to /etc/soj/judge-docker.toml and set the deployment token and TLS paths.
+# Run the same binary: soj-judge /etc/soj/judge-docker.toml
+agent_executor = "docker"
+# A different partition from Slurm is required: one active session per partition.
+agent_partition = "judge-docker"
+# agent_session_id = "22222222-2222-4222-8222-222222222222"
+agent_service_token = "replace-with-agent-service-token"
+judge_work_root = "/var/lib/soj-judge/docker-work"
+judge_idle_poll_ms = 1000
+# Local Unix socket only; this is also the default. DOCKER_HOST is not inherited.
+docker_socket = "/var/run/docker.sock"
+
+grpc_addr = "control-plane.internal:50051"
+grpc_ca_file = "/etc/soj/control-plane-ca.pem"
+# grpc_server_name = "control-plane.internal"
+control_plane_http_url = "https://control-plane.internal:8080"
+# grpc_insecure_dev = true # loopback grpc_addr only; never enable in deployment.

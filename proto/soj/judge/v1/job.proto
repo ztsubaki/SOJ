@@ -29,6 +29,7 @@ message JobAssignment {
   string submission_filename = 9;
   string submission_content_type = 10;
   google.protobuf.Timestamp created_at = 11;
+  soj.v1.AgentExecutor executor = 12;
 }
 
 message AgentSessionView {
@@ -39,4 +40,5 @@ message AgentSessionView {
   reserved "total_nodes", "idle_nodes";
   google.protobuf.Timestamp last_heartbeat_at = 6;
   google.protobuf.Timestamp created_at = 7;
+  soj.v1.AgentExecutor executor = 8;
 }

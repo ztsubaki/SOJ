@@ -9,6 +9,8 @@ import (
 	judgev1 "github.com/ztsubaki/soj/proto/soj/judge/v1"
 	sojv1 "github.com/ztsubaki/soj/proto/soj/v1"
 	"github.com/ztsubaki/soj/services/api/internal/modules/artifacts"
+	"github.com/ztsubaki/soj/services/api/internal/rpcutil"
+	"github.com/ztsubaki/soj/services/api/internal/validation"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -39,14 +41,14 @@ func (s *ControlServer) SetMaxArtifactSize(size int64) {
 }
 
 type session struct {
-	id, partition         string
-	created, heartbeat    time.Time
-	drain, offline, ended *time.Time
+	id, partition, executor string
+	created, heartbeat      time.Time
+	drain, offline, ended   *time.Time
 }
 
 func readSession(ctx context.Context, tx pgx.Tx, id string) (session, error) {
 	v := session{id: id}
-	err := tx.QueryRow(ctx, `SELECT partition,registered_at,last_heartbeat_at,drain_requested_at,offline_at,ended_at FROM agent_sessions WHERE id=$1 FOR UPDATE`, id).Scan(&v.partition, &v.created, &v.heartbeat, &v.drain, &v.offline, &v.ended)
+	err := tx.QueryRow(ctx, `SELECT partition,executor,registered_at,last_heartbeat_at,drain_requested_at,offline_at,ended_at FROM agent_sessions WHERE id=$1 FOR UPDATE`, id).Scan(&v.partition, &v.executor, &v.created, &v.heartbeat, &v.drain, &v.offline, &v.ended)
 	return v, err
 }
 func (v session) live() bool {
@@ -65,7 +67,7 @@ func (v session) state() sojv1.AgentState {
 	return sojv1.AgentState_AGENT_STATE_ONLINE
 }
 func (v session) view() *judgev1.AgentSessionView {
-	return &judgev1.AgentSessionView{Id: v.id, Partition: v.partition, State: v.state(), CreatedAt: timestamppb.New(v.created), LastHeartbeatAt: timestamppb.New(v.heartbeat)}
+	return &judgev1.AgentSessionView{Id: v.id, Partition: v.partition, Executor: rpcutil.ExecutorProto(v.executor), State: v.state(), CreatedAt: timestamppb.New(v.created), LastHeartbeatAt: timestamppb.New(v.heartbeat)}
 }
 func endDrained(ctx context.Context, tx pgx.Tx, id string) error {
 	_, err := tx.Exec(ctx, `UPDATE agent_sessions SET ended_at=now() WHERE id=$1 AND drain_requested_at IS NOT NULL AND offline_at IS NULL AND ended_at IS NULL AND last_heartbeat_at>now()-$2::interval AND NOT EXISTS(SELECT 1 FROM judge_jobs WHERE agent_session_id=$1 AND state IN ('claimed','submitted','running','finishing'))`, id, OfflineThreshold.String())
@@ -79,7 +81,8 @@ func retire(ctx context.Context, tx pgx.Tx, id string) error {
 	return err
 }
 func (s *ControlServer) RegisterAgent(ctx context.Context, r *judgev1.RegisterAgentRequest) (*judgev1.RegisterAgentResponse, error) {
-	if !isUUID(r.GetAgentSessionId()) || !isASCII(r.GetPartition()) {
+	executor := rpcutil.ExecutorText(r.GetExecutor())
+	if !isUUID(r.GetAgentSessionId()) || !isASCII(r.GetPartition()) || executor == "" {
 		return nil, status.Error(codes.InvalidArgument, "invalid registration")
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -95,6 +98,9 @@ func (s *ControlServer) RegisterAgent(ctx context.Context, r *judgev1.RegisterAg
 	if err == nil {
 		if v.partition != r.GetPartition() {
 			return nil, status.Error(codes.InvalidArgument, "partition changed")
+		}
+		if v.executor != executor {
+			return nil, status.Error(codes.InvalidArgument, "executor changed")
 		}
 		if v.offline == nil && v.ended == nil && !v.live() {
 			if err = retire(ctx, tx, v.id); err != nil {
@@ -133,7 +139,7 @@ func (s *ControlServer) RegisterAgent(ctx context.Context, r *judgev1.RegisterAg
 				return nil, e
 			}
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO agent_sessions(id,partition) VALUES($1,$2)`, r.GetAgentSessionId(), r.GetPartition()); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO agent_sessions(id,partition,executor) VALUES($1,$2,$3)`, r.GetAgentSessionId(), r.GetPartition(), executor); err != nil {
 			return nil, err
 		}
 		v, err = readSession(ctx, tx, r.GetAgentSessionId())
@@ -215,10 +221,29 @@ func (s *ControlServer) ClaimJobs(ctx context.Context, r *judgev1.ClaimJobsReque
 		if v.drain != nil {
 			return nil, status.Error(codes.FailedPrecondition, "session draining")
 		}
-		err = tx.QueryRow(ctx, `SELECT id FROM judge_jobs WHERE state='pending' AND $1=ANY(eligible_partitions) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`, v.partition).Scan(&id)
+		// A bounded FIFO head keeps dense partitions cheap without scanning an
+		// unrelated backlog. Sparse partitions fall back to indexed candidates.
+		err = tx.QueryRow(ctx, `WITH head AS MATERIALIZED (
+ SELECT id,created_at FROM judge_jobs WHERE state='pending' ORDER BY created_at,id LIMIT 64
+)
+SELECT j.id FROM head h JOIN judge_jobs j ON j.id=h.id
+WHERE j.state='pending' AND j.eligible_partitions @> ARRAY[$1]::text[] AND (j.manifest ? 'docker')=($2='docker')
+ORDER BY h.created_at,h.id FOR UPDATE OF j SKIP LOCKED LIMIT 1`, v.partition, v.executor).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Materialization prevents LIMIT from choosing a full FIFO-index walk.
+			// Recheck state on the locked row, not only in the candidate snapshot.
+			err = tx.QueryRow(ctx, `WITH eligible AS MATERIALIZED (
+ SELECT id,created_at FROM judge_jobs WHERE state='pending' AND eligible_partitions @> ARRAY[$1]::text[] AND (manifest ? 'docker')=($2='docker')
+)
+SELECT j.id FROM eligible e JOIN judge_jobs j ON j.id=e.id
+WHERE j.state='pending' AND (j.manifest ? 'docker')=($2='docker')
+ORDER BY e.created_at,e.id FOR UPDATE OF j SKIP LOCKED LIMIT 1`, v.partition, v.executor).Scan(&id)
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			var pending, eligible int64
-			if err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE $1=ANY(eligible_partitions)) FROM judge_jobs WHERE state='pending'`, v.partition).Scan(&pending, &eligible); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT
+ (SELECT count(*) FROM judge_jobs WHERE state='pending'),
+ (SELECT count(*) FROM judge_jobs WHERE state='pending' AND eligible_partitions @> ARRAY[$1]::text[] AND (manifest ? 'docker')=($2='docker'))`, v.partition, v.executor).Scan(&pending, &eligible); err != nil {
 				return nil, err
 			}
 			return &judgev1.ClaimJobsResponse{State: v.state(), PendingJobCount: uint32(pending), EligiblePendingJobCount: uint32(eligible)}, nil
@@ -236,6 +261,9 @@ func (s *ControlServer) ClaimJobs(ctx context.Context, r *judgev1.ClaimJobsReque
 	if err != nil {
 		return nil, err
 	}
+	if rpcutil.ExecutorText(assignment.GetExecutor()) != v.executor {
+		return nil, status.Error(codes.FailedPrecondition, "job executor does not match session")
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -243,9 +271,9 @@ func (s *ControlServer) ClaimJobs(ctx context.Context, r *judgev1.ClaimJobsReque
 }
 
 type ownedJob struct {
-	state  string
-	slurm  *string
-	cancel bool
+	state     string
+	execution *string
+	cancel    bool
 }
 
 func lockOwned(ctx context.Context, tx pgx.Tx, agent string, id int64) (session, ownedJob, error) {
@@ -254,7 +282,7 @@ func lockOwned(ctx context.Context, tx pgx.Tx, agent string, id int64) (session,
 		return v, ownedJob{}, status.Error(codes.PermissionDenied, "job is not owned by session")
 	}
 	var j ownedJob
-	err = tx.QueryRow(ctx, `SELECT state,slurm_job_id,cancel_requested_at IS NOT NULL FROM judge_jobs WHERE id=$1 AND agent_session_id=$2 FOR UPDATE`, id, agent).Scan(&j.state, &j.slurm, &j.cancel)
+	err = tx.QueryRow(ctx, `SELECT state,execution_id,cancel_requested_at IS NOT NULL FROM judge_jobs WHERE id=$1 AND agent_session_id=$2 FOR UPDATE`, id, agent).Scan(&j.state, &j.execution, &j.cancel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = status.Error(codes.PermissionDenied, "job is not owned by session")
 	}
@@ -277,25 +305,25 @@ func (s *ControlServer) ReportJob(ctx context.Context, r *judgev1.ReportJobReque
 	if !v.live() || !activeState(j.state) {
 		return nil, status.Error(codes.FailedPrecondition, "job unavailable")
 	}
-	if j.slurm != nil && r.GetSlurmJobId() != "" && *j.slurm != r.GetSlurmJobId() {
-		return nil, status.Error(codes.FailedPrecondition, "slurm id changed")
+	if j.execution != nil && r.GetExecutionId() != "" && *j.execution != r.GetExecutionId() {
+		return nil, status.Error(codes.FailedPrecondition, "execution id changed")
 	}
-	if target != "claimed" && j.slurm == nil && r.GetSlurmJobId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "slurm id required")
+	if target != "claimed" && j.execution == nil && r.GetExecutionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "execution id required")
 	}
 	if stateOrder(target) <= stateOrder(j.state) {
-		return &judgev1.ReportJobResponse{State: toProtoState(j.state), SlurmJobId: j.slurm}, nil
+		return &judgev1.ReportJobResponse{State: toProtoState(j.state), ExecutionId: j.execution}, nil
 	}
-	if _, err = tx.Exec(ctx, `UPDATE judge_jobs SET state=$2,slurm_job_id=COALESCE(slurm_job_id,NULLIF($3,'')),submitted_at=COALESCE(submitted_at,now()),started_at=CASE WHEN $2 IN ('running','finishing') THEN COALESCE(started_at,now()) ELSE started_at END,finishing_at=CASE WHEN $2='finishing' THEN COALESCE(finishing_at,now()) ELSE finishing_at END WHERE id=$1`, r.GetJobId(), target, r.GetSlurmJobId()); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE judge_jobs SET state=$2,execution_id=COALESCE(execution_id,NULLIF($3,'')),submitted_at=COALESCE(submitted_at,now()),started_at=CASE WHEN $2 IN ('running','finishing') THEN COALESCE(started_at,now()) ELSE started_at END,finishing_at=CASE WHEN $2='finishing' THEN COALESCE(finishing_at,now()) ELSE finishing_at END WHERE id=$1`, r.GetJobId(), target, r.GetExecutionId()); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	if j.slurm == nil {
-		j.slurm = r.SlurmJobId
+	if j.execution == nil {
+		j.execution = r.ExecutionId
 	}
-	return &judgev1.ReportJobResponse{State: toProtoState(target), SlurmJobId: j.slurm}, nil
+	return &judgev1.ReportJobResponse{State: toProtoState(target), ExecutionId: j.execution}, nil
 }
 func isPrintableASCII(value string) bool {
 	return value != "" && strings.IndexFunc(value, func(r rune) bool { return r < 32 || r > 126 }) < 0
@@ -360,7 +388,7 @@ func (s *ControlServer) CompleteJob(ctx context.Context, r *judgev1.CompleteJobR
 		if j.state != "finishing" {
 			return status.Error(codes.FailedPrecondition, "job is not finishing")
 		}
-		terminal := terminalStateValue(r.GetSlurmTerminalState())
+		terminal := terminalStateValue(r.GetExecutionTerminalState())
 		result := r.GetResult()
 		verdict := strings.ToLower(strings.TrimPrefix(result.GetVerdict().String(), "VERDICT_"))
 		if result == nil || !validDecimal(result.GetScore()) || result.Message != nil && (!isPrintableASCII(result.GetMessage()) || len(result.GetMessage()) > 1024) {
@@ -380,7 +408,7 @@ func (s *ControlServer) CompleteJob(ctx context.Context, r *judgev1.CompleteJobR
 				return status.Error(codes.InvalidArgument, "invalid resource limit result")
 			}
 		default:
-			return status.Error(codes.InvalidArgument, "invalid slurm terminal state")
+			return status.Error(codes.InvalidArgument, "invalid execution terminal state")
 		}
 		for _, a := range []struct {
 			id   *int64
@@ -396,7 +424,7 @@ func (s *ControlServer) CompleteJob(ctx context.Context, r *judgev1.CompleteJobR
 				}
 			}
 		}
-		_, err := tx.Exec(ctx, `UPDATE judge_jobs SET slurm_terminal_state=$2,verdict=$3,score=$4,message=$5,result_artifact_id=$6,log_artifact_id=$7 WHERE id=$1`, r.GetJobId(), terminal, verdict, result.GetScore(), result.Message, r.ResultArtifactId, r.LogArtifactId)
+		_, err := tx.Exec(ctx, `UPDATE judge_jobs SET execution_terminal_state=$2,verdict=$3,score=$4,message=$5,result_artifact_id=$6,log_artifact_id=$7 WHERE id=$1`, r.GetJobId(), terminal, verdict, result.GetScore(), result.Message, r.ResultArtifactId, r.LogArtifactId)
 		if err != nil {
 			return err
 		}
@@ -421,6 +449,10 @@ func (s *ControlServer) loadAssignment(ctx context.Context, tx pgx.Tx, jobID int
 	if err != nil {
 		return nil, err
 	}
+	packageManifest, err := validation.ParsePackageManifest(manifestJSON)
+	if err != nil {
+		return nil, err
+	}
 	var values map[string]any
 	if err = json.Unmarshal(manifestJSON, &values); err != nil {
 		return nil, err
@@ -429,7 +461,7 @@ func (s *ControlServer) loadAssignment(ctx context.Context, tx pgx.Tx, jobID int
 	if err != nil {
 		return nil, err
 	}
-	return &judgev1.JobAssignment{JobId: id, SubmissionId: submissionID, AgentSessionId: sessionID, AssignedPartition: partition, Package: &judgev1.ArtifactReference{ArtifactId: packageID, Sha256: packageSHA, SizeBytes: uint64(packageSize)}, Submission: &judgev1.ArtifactReference{ArtifactId: sourceID, Sha256: sourceSHA, SizeBytes: uint64(sourceSize)}, Manifest: manifest, SubmissionFilename: sourceFilename, SubmissionContentType: sourceType, CreatedAt: timestamppb.New(created)}, nil
+	return &judgev1.JobAssignment{JobId: id, SubmissionId: submissionID, AgentSessionId: sessionID, AssignedPartition: partition, Executor: rpcutil.ExecutorProto(packageManifest.Executor()), Package: &judgev1.ArtifactReference{ArtifactId: packageID, Sha256: packageSHA, SizeBytes: uint64(packageSize)}, Submission: &judgev1.ArtifactReference{ArtifactId: sourceID, Sha256: sourceSHA, SizeBytes: uint64(sourceSize)}, Manifest: manifest, SubmissionFilename: sourceFilename, SubmissionContentType: sourceType, CreatedAt: timestamppb.New(created)}, nil
 }
 
 func validDecimal(value string) bool {

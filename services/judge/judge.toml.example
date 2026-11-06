@@ -1,6 +1,9 @@
 # Copy to judge.toml, set the token and paths, then run:
 #   soj-judge /etc/soj/judge.toml
 
+# Default backend when omitted. Docker uses judge.docker.toml.example instead.
+agent_executor = "slurm"
+
 # Optional. A UUID is generated at each Agent startup if omitted.
 # agent_session_id = "11111111-1111-4111-8111-111111111111"
 agent_partition = "judge"

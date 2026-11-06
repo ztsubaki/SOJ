@@ -6,17 +6,17 @@ import (
 	sojv1 "github.com/ztsubaki/soj/proto/soj/v1"
 )
 
-func terminalStateValue(value sojv1.SlurmTerminalState) string {
+func terminalStateValue(value sojv1.ExecutionTerminalState) string {
 	switch value {
-	case sojv1.SlurmTerminalState_SLURM_TERMINAL_STATE_COMPLETED:
+	case sojv1.ExecutionTerminalState_EXECUTION_TERMINAL_STATE_COMPLETED:
 		return "COMPLETED"
-	case sojv1.SlurmTerminalState_SLURM_TERMINAL_STATE_FAILED:
+	case sojv1.ExecutionTerminalState_EXECUTION_TERMINAL_STATE_FAILED:
 		return "FAILED"
-	case sojv1.SlurmTerminalState_SLURM_TERMINAL_STATE_TIMEOUT:
+	case sojv1.ExecutionTerminalState_EXECUTION_TERMINAL_STATE_TIMEOUT:
 		return "TIMEOUT"
-	case sojv1.SlurmTerminalState_SLURM_TERMINAL_STATE_OUT_OF_MEMORY:
+	case sojv1.ExecutionTerminalState_EXECUTION_TERMINAL_STATE_OUT_OF_MEMORY:
 		return "OUT_OF_MEMORY"
-	case sojv1.SlurmTerminalState_SLURM_TERMINAL_STATE_CANCELLED:
+	case sojv1.ExecutionTerminalState_EXECUTION_TERMINAL_STATE_CANCELLED:
 		return "CANCELLED"
 	default:
 		return ""

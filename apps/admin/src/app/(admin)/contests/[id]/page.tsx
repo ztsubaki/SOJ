@@ -9,10 +9,9 @@ import Label from "@/components/form/Label";
 import Select from "@/components/form/Select";
 import Switch from "@/components/form/switch/Switch";
 import MarkdownEditor from "@/components/form/MarkdownEditor";
-import SearchableMultiSelect from "@/components/form/SearchableMultiSelect";
+import ProblemMultiSelect from "@/components/form/ProblemMultiSelect";
 import type { ContestDetail, ContestForm } from "@/lib/admin-types";
 import { fromLocalDateTime, toLocalDateTime } from "@/lib/local-datetime";
-import { allPages } from "@/lib/pagination";
 import { ToastMessage } from "@/context/ToastContext";
 const policies = [
   { value: "best", label: "每题最高分" },
@@ -22,19 +21,17 @@ export default function EditContestPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [form, setForm] = useState<ContestForm | null>(null);
-  const [problems, setProblems] = useState<{ value: string; label: string }[]>(
-    [],
-  );
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [initialProblems, setInitialProblems] = useState<ContestDetail["problems"]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   useEffect(() => {
-    void Promise.all([
-      request<ContestDetail>(`/admin/contests/${encodeURIComponent(id)}`),
-      allPages<{ id: number; title: string }>("/admin/problems"),
-    ])
-      .then(([contest, page]) => {
+    const controller = new AbortController();
+    void request<ContestDetail>(`/admin/contests/${encodeURIComponent(id)}`, { signal: controller.signal })
+      .then((contest) => {
+        if (controller.signal.aborted) return;
         setForm({
           title: contest.title,
           startsAt: contest.startsAt,
@@ -44,14 +41,13 @@ export default function EditContestPage() {
           scoringPolicy: contest.scoringPolicy,
           problems: contest.problems.map((x) => x.id),
         });
-        setProblems(
-          page.map((x) => ({
-            value: String(x.id),
-            label: `${x.title} (${x.id})`,
-          })),
-        );
+        setInitialProblems(contest.problems);
+        setLoadedId(id);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "无法读取比赛"));
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "无法读取比赛");
+      });
+    return () => controller.abort();
   }, [id]);
   useEffect(() => {
     if (!form) return;
@@ -69,7 +65,7 @@ export default function EditContestPage() {
     k: K,
     v: ContestForm[K],
   ) => setForm((x) => (x ? { ...x, [k]: v } : x));
-  if (!form)
+  if (!form || loadedId !== id)
     return (
       <Panel className="p-8 text-center">
         <ToastMessage message={error} />
@@ -206,14 +202,12 @@ export default function EditContestPage() {
           )}
         </Panel>
         <Panel className="p-5">
-          <SearchableMultiSelect
-            id="problems"
-            options={problems}
-            selected={form.problems.map(String)}
+          <ProblemMultiSelect
+            key={id}
+            selected={form.problems}
+            initialProblems={initialProblems}
             disabled={fixedFields}
-            onChange={(v) => update("problems", v.map(Number))}
-            placeholder="选择题目"
-            searchPlaceholder="搜索题目"
+            onChange={(problems) => update("problems", problems)}
           />
         </Panel>
       </div>

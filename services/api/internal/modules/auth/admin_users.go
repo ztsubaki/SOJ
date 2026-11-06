@@ -206,7 +206,7 @@ func (s *Service) AdminDeleteUser(ctx context.Context, actor User, id int64) err
 	if _, err = tx.Exec(ctx, `UPDATE submissions SET current_job_id=NULL WHERE user_id=$1`, id); err != nil {
 		return err
 	}
-	refs, err := deleteJobs(ctx, tx, `DELETE FROM judge_jobs WHERE submission_id IN (SELECT id FROM submissions WHERE user_id=$1)`, id)
+	refs, pendingKeys, err := artifacts.DeleteSubmissionJobs(ctx, tx, `SELECT id FROM submissions WHERE user_id=$1`, id)
 	if err != nil {
 		return err
 	}
@@ -231,32 +231,8 @@ func (s *Service) AdminDeleteUser(ctx context.Context, actor User, id int64) err
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
-	artifacts.RemoveObjects(s.artifactRoot, removed)
+	artifacts.RemoveObjects(s.artifactRoot, append(pendingKeys, removed...))
 	return nil
-}
-
-func deleteJobs(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]int64, error) {
-	rows, err := tx.Query(ctx, query+` RETURNING source_artifact_id,package_artifact_id,result_artifact_id,log_artifact_id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	refs := []int64{}
-	for rows.Next() {
-		var source, pkg int64
-		var result, log *int64
-		if err := rows.Scan(&source, &pkg, &result, &log); err != nil {
-			return nil, err
-		}
-		refs = append(refs, source, pkg)
-		if result != nil {
-			refs = append(refs, *result)
-		}
-		if log != nil {
-			refs = append(refs, *log)
-		}
-	}
-	return refs, rows.Err()
 }
 
 func deleteSubmissions(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]int64, error) {

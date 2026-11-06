@@ -12,7 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { AgentSession } from "@/lib/admin-types";
-import { allPages } from "@/lib/pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
+import Pagination from "@/components/ui/Pagination";
 import { ToastMessage } from "@/context/ToastContext";
 type Status = {
   activeAgents: number;
@@ -22,21 +23,23 @@ type Status = {
 };
 export default function SystemPage() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [agents, setAgents] = useState<AgentSession[]>([]);
+  const { items: agents, page, pageSize, total, loading, error: listError, setPage, refresh } = usePaginatedQuery<AgentSession>("/admin/system/agents");
+  const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [draining, setDraining] = useState<string | null>(null);
-  const reload = () => Promise.all([
-    request<Status>("/admin/system/status"),
-    allPages<AgentSession>("/admin/system/agents"),
-  ]).then(([nextStatus, nextAgents]) => {
-    setStatus(nextStatus); setAgents(nextAgents);
-  });
+  const reload = () => {
+    setRevision((value) => value + 1);
+    refresh();
+  };
   useEffect(() => {
-    void reload()
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "无法读取系统状态"),
-      );
-  }, []);
+    const controller = new AbortController();
+    void request<Status>("/admin/system/status", { signal: controller.signal })
+      .then((next) => { if (!controller.signal.aborted) setStatus(next); })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "无法读取系统状态");
+      });
+    return () => controller.abort();
+  }, [revision]);
   const metrics = status
     ? [
         ["有效 Agent", status.activeAgents],
@@ -64,7 +67,7 @@ export default function SystemPage() {
           </Panel>
         </div>
       ))}
-      <ToastMessage message={error} />
+      <ToastMessage message={error || listError} />
       <Panel as="section" className="col-span-12 p-5">
         <h3 className="text-lg font-semibold">Agent 会话</h3>
         <div className="mt-5 overflow-x-auto">
@@ -73,6 +76,7 @@ export default function SystemPage() {
               <TableRow>
                 <TableCell isHeader>会话</TableCell>
                 <TableCell isHeader>分区</TableCell>
+                <TableCell isHeader>执行类型</TableCell>
                 <TableCell isHeader>状态</TableCell>
                 <TableCell isHeader>工作负载</TableCell>
                 <TableCell isHeader>活动 Job</TableCell>
@@ -85,6 +89,7 @@ export default function SystemPage() {
                 <TableRow key={x.id}>
                   <TableCell className="font-mono">{x.id}</TableCell>
                   <TableCell>{x.partition}</TableCell>
+                  <TableCell>{x.executor === "docker" ? "Docker" : "Slurm"}</TableCell>
                   <TableCell>
                     <Badge
                       size="sm"
@@ -128,6 +133,7 @@ export default function SystemPage() {
             </TableBody>
           </Table>
         </div>
+        <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
       </Panel>
     </div>
   );

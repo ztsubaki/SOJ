@@ -40,15 +40,13 @@ export async function getHomeData() {
   };
 }
 export async function getContestDetail(id: string) {
-	const contestID = numericID(id);
+  const contestID = numericID(id);
   const session = (await cookies()).get("soj_session")?.value;
-	const baseResponse = await rpc("ContestService", "getContest", { id: contestID }, session);
+  const baseResponse = await rpc("ContestService", "getContest", { id: contestID }, session);
   const current = contest(baseResponse.contest);
   const canReadProblems =
     current.status === "ended" ||
     (current.status === "running" && baseResponse.registered);
-  const canReadLeaderboard =
-    current.status === "running" || current.status === "ended";
   const problems = await (
     canReadProblems
       ? rpc(
@@ -59,13 +57,9 @@ export async function getContestDetail(id: string) {
         )
     : Promise.resolve({ items: [] })
   );
-  const ranks = canReadLeaderboard
-	? await rpc("ContestService", "getLeaderboard", { contestId: contestID }, session)
-    : { items: [] };
   return {
     ...current,
     problems: items(problems).map((item) => problem(item)),
-    leaderboard: { items: items(ranks).map(leaderboard) },
     registrationState: (baseResponse.registered && session
       ? "registered"
       : "unregistered") as RegistrationState,

@@ -2,7 +2,7 @@
 import Panel from "@/components/ui/Panel";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Badge from "@/components/ui/badge/Badge";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
@@ -17,7 +17,8 @@ import {
 import type { SubmissionDetail, SubmissionStatus } from "@/lib/admin-types";
 import { verdictColor } from "@/lib/presentation";
 import { rejudgeSubmission } from "@/lib/submissions-api";
-import { allPages } from "@/lib/pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
+import Pagination from "@/components/ui/Pagination";
 import { useToast, ToastMessage } from "@/context/ToastContext";
 
 const options = [
@@ -39,34 +40,17 @@ function canRejudge(status: SubmissionStatus) {
 export default function SubmissionsPage() {
   const searchParams = useSearchParams();
   const user = searchParams.get("user") ?? "";
-  const [items, setItems] = useState<SubmissionDetail[]>([]);
   const [search, setSearch] = useState("");
   const [verdict, setVerdict] = useState("");
   const [error, setError] = useState("");
   const [rejudging, setRejudging] = useState<number | null>(null);
   const { show } = useToast();
 
-  useEffect(() => {
-    const query = new URLSearchParams();
-    if (search) query.set("query", search);
-    if (verdict) query.set("verdict", verdict);
-    if (user) query.set("user", user);
-    const timer = setTimeout(
-      () =>
-        void allPages<SubmissionDetail>(`/admin/submissions?${query}`)
-          .then((data) => {
-            setItems(data);
-            setError("");
-          })
-          .catch((reason) =>
-            setError(
-              reason instanceof Error ? reason.message : "无法读取提交记录",
-            ),
-          ),
-      250,
-    );
-    return () => clearTimeout(timer);
-  }, [search, verdict, user]);
+  const query = new URLSearchParams();
+  if (search) query.set("query", search);
+  if (verdict) query.set("verdict", verdict);
+  if (user) query.set("user", user);
+  const { items, page, pageSize, total, loading, error: listError, setPage } = usePaginatedQuery<SubmissionDetail>(`/admin/submissions?${query}`, undefined, 250);
 
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
@@ -185,10 +169,11 @@ export default function SubmissionsPage() {
             </TableBody>
           </Table>
         </div>
-        {!items.length && !error && (
+        {!items.length && !loading && !error && !listError && (
           <p className="py-10 text-center text-gray-500">未找到提交记录</p>
         )}
-        <ToastMessage message={error} />
+        <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
+        <ToastMessage message={error || listError} />
       </Panel>
     </div>
   );

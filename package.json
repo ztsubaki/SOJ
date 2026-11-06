@@ -5,5 +5,8 @@
     "apps/web",
     "apps/admin",
     "packages/bff"
-  ]
+  ],
+  "overrides": {
+    "katex": "^0.18.2"
+  }
 }

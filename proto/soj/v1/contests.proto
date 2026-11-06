@@ -44,8 +44,14 @@ message GetContestProblemRequest {
 }
 message GetContestProblemResponse { Problem problem = 1; }
 
-message GetLeaderboardRequest { int64 contest_id = 1; }
-message GetLeaderboardResponse { repeated LeaderboardEntry items = 1; }
+message GetLeaderboardRequest {
+  int64 contest_id = 1;
+  PageRequest page = 2;
+}
+message GetLeaderboardResponse {
+  repeated LeaderboardEntry items = 1;
+  PageMeta page = 2;
+}
 
 message ListParticipantsRequest {
   int64 contest_id = 1;

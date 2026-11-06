@@ -74,6 +74,92 @@ func TestLeaderboardProjectionIntegration(t *testing.T) {
 	}
 }
 
+func TestLeaderboardPaginationAndPrecisionIntegration(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	resetProjectionFixture(t, ctx, pool)
+	for _, statement := range []string{
+		`INSERT INTO users(id,username,email,password_hash,role,status) OVERRIDING SYSTEM VALUE VALUES (9503,'projection-user-three','projection-user-three@soj.local','not-for-login','user','active'),(9504,'projection-user-four','projection-user-four@soj.local','not-for-login','user','active') ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO contest_registrations(contest_id,user_id) VALUES (9500,9503),(9500,9504)`,
+		`UPDATE contest_problems SET ordinal=ordinal+2 WHERE contest_id=9500`,
+		`UPDATE contest_problems SET ordinal=CASE problem_id WHEN 9502 THEN 1 ELSE 2 END WHERE contest_id=9500`,
+		`UPDATE submissions SET created_at=(SELECT created_at FROM submissions WHERE id=9501) WHERE id=9502`,
+		`UPDATE judge_jobs SET score=10.10000000000000000002 WHERE id=9501`,
+		`UPDATE judge_jobs SET state='completed',agent_session_id='agent-projection',assigned_partition='projection',verdict='accepted',score=10.10000000000000000001,finished_at=now() WHERE id=9502`,
+		`UPDATE judge_jobs SET score=10.30000000000000000002 WHERE id=9503`,
+		`INSERT INTO submissions(id,user_id,problem_id,contest_id,kind,source_artifact_id,created_at) OVERRIDING SYSTEM VALUE VALUES (9504,9501,9502,9500,'contest',101,now()),(9505,9503,9501,9500,'contest',101,now())`,
+		`INSERT INTO judge_jobs(id,submission_id,source_artifact_id,package_artifact_id,package_sha256,manifest,eligible_partitions,state,agent_session_id,assigned_partition,verdict,score,finished_at) OVERRIDING SYSTEM VALUE VALUES (9504,9504,101,100,'5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03','{}',ARRAY['projection'],'completed','agent-projection','projection','accepted',0.20000000000000000000,now()),(9505,9505,101,100,'5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03','{}',ARRAY['projection'],'completed','agent-projection','projection','accepted',9.30000000000000000001,now()),(9506,9503,101,100,'5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03','{}',ARRAY['projection'],'completed','agent-projection','projection','accepted',9000,now()-interval '1 hour')`,
+		`UPDATE submissions SET current_job_id=CASE id WHEN 9504 THEN 9504 WHEN 9505 THEN 9505 END WHERE id IN (9504,9505)`,
+	} {
+		if _, err := pool.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewService(pool, t.TempDir())
+	type expectedEntry struct {
+		userID        int64
+		score         string
+		rank          int
+		solved        int
+		submissions   int
+		problemScores []string
+	}
+	for _, tc := range []struct {
+		policy  string
+		entries []expectedEntry
+	}{
+		{"best", []expectedEntry{
+			{9501, "10.30000000000000000002", 1, 2, 3, []string{"0.20000000000000000000", "10.10000000000000000002"}},
+			{9502, "10.30000000000000000002", 1, 1, 1, []string{"0", "10.30000000000000000002"}},
+			{9503, "9.30000000000000000001", 2, 1, 1, []string{"0", "9.30000000000000000001"}},
+			{9504, "0", 3, 0, 0, []string{"0", "0"}},
+		}},
+		{"latest", []expectedEntry{
+			{9502, "10.30000000000000000002", 1, 1, 1, []string{"0", "10.30000000000000000002"}},
+			{9501, "10.30000000000000000001", 2, 2, 3, []string{"0.20000000000000000000", "10.10000000000000000001"}},
+			{9503, "9.30000000000000000001", 3, 1, 1, []string{"0", "9.30000000000000000001"}},
+			{9504, "0", 4, 0, 0, []string{"0", "0"}},
+		}},
+	} {
+		t.Run(tc.policy, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE contests SET scoring_policy=$1 WHERE id=9500`, tc.policy); err != nil {
+				t.Fatal(err)
+			}
+			for index, want := range tc.entries {
+				items, total, err := service.Leaderboard(ctx, 9500, false, index+1, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if total != len(tc.entries) || len(items) != 1 {
+					t.Fatalf("page %d = total %d, items %#v", index+1, total, items)
+				}
+				assertEntry(t, items[0], want.userID, want.score, want.rank, want.solved, want.submissions, want.problemScores...)
+				if items[0].ProblemScores[0].ProblemID != 9502 || items[0].ProblemScores[1].ProblemID != 9501 {
+					t.Fatalf("problem order = %#v", items[0].ProblemScores)
+				}
+				if (items[0].LastSubmission == nil) != (want.submissions == 0) {
+					t.Fatalf("last submission = %v for %d submissions", items[0].LastSubmission, want.submissions)
+				}
+			}
+			items, total, err := service.Leaderboard(ctx, 9500, false, len(tc.entries)+1, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if total != len(tc.entries) || len(items) != 0 {
+				t.Fatalf("page past end = total %d, items %#v", total, items)
+			}
+		})
+	}
+}
+
 func assertEntry(t *testing.T, item LeaderboardEntry, user int64, score string, rank, solved, submissions int, problemScores ...string) {
 	t.Helper()
 	if item.UserID != user || item.Score != score || item.Rank != rank || item.Solved != solved || item.Submissions != submissions {

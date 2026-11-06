@@ -33,7 +33,7 @@ func TestDrainIdleAgentIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM agent_sessions WHERE id=$1", agentID)
 	})
-	if _, err := pool.Exec(ctx, `INSERT INTO agent_sessions(id,partition) VALUES($1,'drain-integration')`, agentID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO agent_sessions(id,partition,executor) VALUES($1,'drain-integration','docker')`, agentID); err != nil {
 		t.Fatalf("create idle agent: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestDrainIdleAgentIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DrainAgent(): %v", err)
 	}
-	if response.GetState() != sojv1.AgentState_AGENT_STATE_ENDED || response.GetDrainRequestedAt() == nil || response.GetEndedAt() == nil {
+	if response.GetState() != sojv1.AgentState_AGENT_STATE_ENDED || response.GetDrainRequestedAt() == nil || response.GetEndedAt() == nil || response.GetExecutor() != sojv1.AgentExecutor_AGENT_EXECUTOR_DOCKER {
 		t.Fatalf("DrainAgent() = %+v, want immediately disabled idle agent", response)
 	}
 	var drain, ended bool
@@ -98,7 +98,7 @@ func TestGetStatsCountsCurrentRunningSubmissionAsPendingIntegration(t *testing.T
 		_, _ = pool.Exec(context.Background(), "DELETE FROM submissions WHERE id=$1", submissionID)
 		_, _ = pool.Exec(context.Background(), "DELETE FROM agent_sessions WHERE id=$1", agentID)
 	})
-	if _, err := pool.Exec(ctx, `INSERT INTO agent_sessions(id,partition) VALUES($1,'system-stats')`, agentID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO agent_sessions(id,partition,executor) VALUES($1,'system-stats','slurm')`, agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO submissions(id,user_id,problem_id,contest_id,kind,source_artifact_id)

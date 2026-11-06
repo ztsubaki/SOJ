@@ -5,6 +5,7 @@ import Button from "@/components/ui/button/Button";
 import { useAuth } from "@/context/AuthContext";
 import { useSidebar } from "@/context/SidebarContext";
 import { usePlatformName } from "@/context/PlatformNameContext";
+import { useToast } from "@/context/ToastContext";
 import Link from "next/link";
 import React from "react";
 
@@ -12,6 +13,19 @@ const AppHeader: React.FC = () => {
   const platformName = usePlatformName();
   const { isMobileOpen, toggleSidebar, toggleMobileSidebar } = useSidebar();
   const { user, signOut } = useAuth();
+  const { show } = useToast();
+  const [isSigningOut, setIsSigningOut] = React.useState(false);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } catch (reason) {
+      show(reason instanceof Error ? `退出失败：${reason.message}` : "退出失败，请稍后重试。", "error");
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
 
   const handleToggle = () => {
     if (window.innerWidth >= 1024) {
@@ -22,11 +36,11 @@ const AppHeader: React.FC = () => {
   };
 
   return (
-    <header className="sticky top-0 flex w-full bg-white border-gray-200 z-99999 dark:border-gray-800 dark:bg-gray-900 lg:border-b">
+    <header className="sticky top-0 z-9 flex w-full border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 lg:border-b">
       <div className="flex flex-col items-center justify-between grow lg:flex-row lg:px-6">
         <div className="flex items-center justify-between w-full gap-2 px-3 py-3 border-b border-gray-200 dark:border-gray-800 sm:gap-4 lg:justify-normal lg:border-b-0 lg:px-0 lg:py-4">
           <button
-            className="items-center justify-center w-10 h-10 text-gray-500 border-gray-200 rounded-lg z-99999 dark:border-gray-800 lg:flex dark:text-gray-400 lg:h-11 lg:w-11 lg:border"
+            className="flex items-center justify-center h-10 w-10 rounded-lg border-gray-200 text-gray-500 dark:border-gray-800 dark:text-gray-400 lg:h-11 lg:w-11 lg:border"
             onClick={handleToggle}
             aria-label="Toggle Sidebar"
           >
@@ -96,8 +110,8 @@ const AppHeader: React.FC = () => {
                 {user?.email}
               </p>
             </div>
-            <Button size="sm" variant="outline" onClick={() => void signOut()}>
-              退出
+            <Button size="sm" variant="outline" disabled={isSigningOut} onClick={() => void handleSignOut()}>
+              {isSigningOut ? "退出中..." : "退出"}
             </Button>
           </div>
         </div>

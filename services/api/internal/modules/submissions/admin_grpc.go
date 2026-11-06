@@ -141,8 +141,8 @@ func protoJob(item Job) (*sojv1.Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	value := &sojv1.Job{Id: item.ID, SubmissionId: item.SubmissionID, State: jobStateProto(item.State), ExecutionSnapshot: &sojv1.JobExecutionSnapshot{PackageArtifactId: item.PackageArtifactID, PackageSha256: item.PackageSHA256, Manifest: manifest, EligiblePartitions: item.EligiblePartitions, AssignedPartition: item.AssignedPartition}, CreatedAt: timestamppb.New(item.CreatedAt), CancelRequestedAt: timestamp(item.CancelRequestedAt), ClaimedAt: timestamp(item.ClaimedAt), SubmittedAt: timestamp(item.SubmittedAt), StartedAt: timestamp(item.StartedAt), FinishedAt: timestamp(item.FinishedAt)}
-	value.AgentSessionId, value.SlurmJobId = item.AgentSessionID, item.SlurmJobID
+	value := &sojv1.Job{Id: item.ID, SubmissionId: item.SubmissionID, State: jobStateProto(item.State), ExecutionSnapshot: &sojv1.JobExecutionSnapshot{PackageArtifactId: item.PackageArtifactID, PackageSha256: item.PackageSHA256, Manifest: manifest, Executor: rpcutil.ExecutorProto(item.Executor), EligiblePartitions: item.EligiblePartitions, AssignedPartition: item.AssignedPartition}, CreatedAt: timestamppb.New(item.CreatedAt), CancelRequestedAt: timestamp(item.CancelRequestedAt), ClaimedAt: timestamp(item.ClaimedAt), SubmittedAt: timestamp(item.SubmittedAt), StartedAt: timestamp(item.StartedAt), FinishedAt: timestamp(item.FinishedAt)}
+	value.AgentSessionId, value.ExecutionId = item.AgentSessionID, item.ExecutionID
 	if item.Verdict != nil {
 		verdict := verdictProto(*item.Verdict)
 		value.Verdict = &verdict

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "problemId": 1,
+  "docker": {
+    "image": "sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8",
+    "cpus": 1,
+    "memoryMb": 128,
+    "timeLimitSeconds": 10
+  }
+}

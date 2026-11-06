@@ -1,9 +1,8 @@
 import { request } from "@soj/bff/client";
 import type { UserDetail } from "@/lib/admin-types";
-import { allPages } from "@/lib/pagination";
+import { requestPage, type PageRequest, type PageResult } from "@/lib/pagination";
 
 type UserPatch = { email?: string; status?: "active" | "disabled" };
-type UserPage = { items: UserDetail[]; page: number; pageSize: number; total: number };
 type CreateUserInput = { username: string; email: string };
 type CreateUserResult = { user: UserDetail };
 
@@ -31,9 +30,8 @@ export function deleteUser(id: number): Promise<void> {
 	return request(`/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export async function listUsers(): Promise<UserPage> {
-  const items = await allPages<UserDetail>("/admin/users");
-  return { items, page: 1, pageSize: items.length, total: items.length };
+export function listUsers(pagination: PageRequest, signal?: AbortSignal): Promise<PageResult<UserDetail>> {
+  return requestPage<UserDetail>("/admin/users", pagination, signal);
 }
 
 export function getUser(id: number): Promise<UserDetail> {

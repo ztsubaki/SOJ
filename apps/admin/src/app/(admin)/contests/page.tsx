@@ -1,11 +1,11 @@
 "use client";
 import Panel from "@/components/ui/Panel";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import Badge from "@/components/ui/badge/Badge";
 import type { ContestDetail } from "@/lib/admin-types";
 import { statusColor } from "@/lib/presentation";
-import { allPages } from "@/lib/pagination";
+import { usePaginatedQuery } from "@/lib/pagination";
+import Pagination from "@/components/ui/Pagination";
 import { ToastMessage } from "@/context/ToastContext";
 
 const statusText: Record<string, string> = {
@@ -15,16 +15,7 @@ const statusText: Record<string, string> = {
 };
 
 export default function ContestsPage() {
-  const [contests, setContests] = useState<ContestDetail[]>([]);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    void allPages<ContestDetail>("/admin/contests")
-      .then(setContests)
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : "无法读取比赛列表"),
-      );
-  }, []);
+  const { items: contests, page, pageSize, total, loading, error, setPage } = usePaginatedQuery<ContestDetail>("/admin/contests");
 
   return (
     <div className="grid grid-cols-12 gap-4 md:gap-6">
@@ -83,6 +74,9 @@ export default function ContestsPage() {
             </Panel>
           </div>
         ))}
+      </div>
+      <div className="col-span-12">
+        <Pagination page={page} pageSize={pageSize} total={total} loading={loading} onPageChange={setPage} />
       </div>
       <ToastMessage message={error} />
     </div>

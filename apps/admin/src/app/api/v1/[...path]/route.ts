@@ -1,13 +1,5 @@
 import type { ProblemInput, ProblemPatch } from "@soj/bff/generated/soj/v1/problems";
 import type { ContestInput, CreateUserRequest } from "@soj/bff/generated/soj/v1/admin";
-type ProblemBody = Omit<ProblemInput, "difficulty" | "tags"> & {
-  difficulty?: string;
-  tags?: string[] | null;
-};
-type ContestBody = Omit<
-  ContestInput,
-  "startsAt" | "endsAt" | "scoringPolicy"
-> & { startsAt?: string; endsAt?: string; scoringPolicy?: string };
 import {
   AgentState,
   ContestStatus,
@@ -23,14 +15,12 @@ import { megabytes, proxyUpload, proxyDownload } from "@soj/bff/server/artifacts
 import { NextRequest, NextResponse } from "next/server";
 import { rpc } from "@/lib/server/control-plane";
 
-export const runtime = "nodejs";
-type Params = { params: Promise<{ path: string[] }> };
-import { authRoute } from "@soj/bff/server/auth";
+import { authRoutes } from "@soj/bff/server/auth";
+import { createRouter, type Route, type RouteHandler } from "@soj/bff/server/router";
 import {
   session,
   json,
   error,
-  grpcError,
   body,
   grpcTimestamp,
   enumInput,
@@ -42,10 +32,8 @@ import {
   isPositiveIntegerArray,
   nullable,
   numericID,
-  sameOrigin,
   optional as optionalBody,
   pagination,
-  query,
   optionalQuery,
 } from "@soj/bff/server/http";
 import {
@@ -60,9 +48,16 @@ import {
   job,
   leaderboard,
 } from "@soj/bff/server/mapping";
-const params = (request: NextRequest, fields: string[] = []) =>
-  query(request, ["page", "pageSize", ...fields]);
-const page = (request: NextRequest, fields: string[] = []) => pagination(params(request, fields));
+type ProblemBody = Omit<ProblemInput, "difficulty" | "tags"> & {
+  difficulty?: string;
+  tags?: string[] | null;
+};
+type ContestBody = Omit<
+  ContestInput,
+  "startsAt" | "endsAt" | "scoringPolicy"
+> & { startsAt?: string; endsAt?: string; scoringPolicy?: string };
+export const runtime = "nodejs";
+const page = (request: NextRequest) => pagination(request.nextUrl.searchParams);
 const optional = (request: NextRequest, name: string) =>
   optionalQuery(request.nextUrl.searchParams, name);
 const validProblemCreate = (value: Record<string, unknown>) =>
@@ -75,7 +70,7 @@ const validProblemPatch = (value: Record<string, unknown>) =>
   optionalBody(value.partitions, isStringArray) && nullable(value.tags, isStringArray);
 const validContestCreate = (value: Record<string, unknown>) =>
   isString(value.title) && isString(value.startsAt) &&
-	 isString(value.endsAt) && isString(value.description) && isPositiveIntegerArray(value.problems) &&
+  isString(value.endsAt) && isString(value.description) && isPositiveIntegerArray(value.problems) &&
   isBoolean(value.visible) && isString(value.scoringPolicy);
 const validContestPatch = (value: Record<string, unknown>) =>
   optionalBody(value.title, isString) && optionalBody(value.startsAt, isString) &&
@@ -83,44 +78,34 @@ const validContestPatch = (value: Record<string, unknown>) =>
   optionalBody(value.problems, isPositiveIntegerArray) && optionalBody(value.visible, isBoolean) &&
   optionalBody(value.scoringPolicy, isString);
 
-// Keep route existence and its accepted query parameters together. This is
-// also the source for the 404/405 distinction at the end of handle.
-function adminRoute(path: string[]) {
-  const key = path.join("/");
-  const collections: Record<string, string[]> = {
-    "admin/stats": [],
-    "admin/problems": ["page", "pageSize", "query", "enabled"],
-    "admin/contests": ["page", "pageSize", "query", "status"],
-    "admin/submissions": ["page", "pageSize", "query", "user", "problem", "verdict", "kind"],
-    "admin/users": ["page", "pageSize", "query", "status", "role"],
-    "admin/system/status": [],
-    "admin/system/agents": ["page", "pageSize", "partition", "state"],
-  };
-  if (key in collections) return collections[key];
-  if (path[0] !== "admin") return undefined;
-  if (path[1] === "problems" && (path.length === 3 || (path.length === 4 && ["package", "test-submissions"].includes(path[3])))) return [];
-  if (path[1] === "contests" && (path.length === 3 || (path.length === 4 && path[3] === "rankings") || (path.length === 6 && path[3] === "rankings" && path[5] === "disqualify"))) return path[3] === "rankings" ? ["page", "pageSize"] : [];
-  if (path[1] === "submissions" && (path.length === 3 || (path.length === 4 && ["source", "rejudge", "cancel", "jobs"].includes(path[3])) || (path.length === 6 && path[3] === "jobs" && ["log", "result"].includes(path[5])))) return path[3] === "jobs" ? ["page", "pageSize"] : [];
-  if (path[1] === "users" && path.length === 3) return [];
-  if (path[1] === "system" && path.length === 5 && path[2] === "agents" && path[4] === "drain") return [];
-  return undefined;
-}
+const qualification: RouteHandler = async (request, path) => {
+  await rpc(
+    "AdminContestService",
+    request.method === "POST"
+      ? "disqualifyParticipant"
+      : "restoreParticipant",
+    { contestId: numericID(path[2]), userId: numericID(path[4]) },
+    session(request),
+  );
+  return new NextResponse(null, { status: 204 });
+};
 
-async function handle(request: NextRequest, path: string[]) {
-  const key = path.join("/");
-  const method = request.method === "HEAD" ? "GET" : request.method;
-  const route = adminRoute(path);
-  if (
-    method !== "GET" &&
-    key !== "auth/logout" &&
-    !sameOrigin(request)
-  )
-    return error(4030, "origin mismatch");
-  try {
-    const authResponse = await authRoute(request, key, rpc, false);
-    if (authResponse) return authResponse;
-    if (method === "GET") query(request, route ?? []);
-    if (key === "admin/stats" && method === "GET") {
+const downloadJobArtifact: RouteHandler = async (request, path) => {
+  return proxyDownload(
+    request,
+    `/internal/v1/admin/submissions/${encodeURIComponent(path[2])}/jobs/${encodeURIComponent(path[4])}/${path[5]}`,
+    process.env.ADMIN_BFF_SERVICE_TOKEN ?? "",
+    path[5] === "result"
+      ? { contentType: "application/json; charset=utf-8", inline: true }
+      : { contentType: "text/plain; charset=utf-8", inline: true },
+  );
+};
+
+const handle = createRouter("Admin", [
+  ...authRoutes(rpc, false),
+  {
+    path: "admin/stats",
+    GET: async (request) => {
       const x = await rpc(
         "AdminSystemService",
         "getStats",
@@ -133,21 +118,25 @@ async function handle(request: NextRequest, path: string[]) {
         pendingSubmissions: Number(x?.pendingSubmissions ?? 0),
         agentWorkload: workload(x.agentWorkload),
       });
-    }
-    if (key === "admin/problems" && method === "GET") {
+    },
+  },
+  {
+    path: "admin/problems",
+    query: ["page", "pageSize", "query", "enabled"],
+    GET: async (request) => {
       const x = await rpc(
         "AdminProblemService",
         "listProblems",
         {
-          page: page(request, ["query", "enabled"]),
+          page: page(request),
           query: optional(request, "query"),
           enabled: booleanInput(optional(request, "enabled")),
         },
         session(request),
       );
       return json(paged(x, problem));
-    }
-    if (key === "admin/problems" && method === "POST") {
+    },
+    POST: async (request) => {
       const input = await body<ProblemBody>(request, ["title", "difficulty", "tags", "content", "enabled", "partitions"], validProblemCreate);
       if (!input) return error(4000, "invalid JSON");
       return json(
@@ -171,13 +160,11 @@ async function handle(request: NextRequest, path: string[]) {
         ),
         201,
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "problems" &&
-      path.length === 3 &&
-      method === "GET"
-    )
+    },
+  },
+  {
+    path: "admin/problems/:problemId",
+    GET: async (request, path) => {
       return json(
         problem(
           await rpc(
@@ -188,12 +175,8 @@ async function handle(request: NextRequest, path: string[]) {
           ),
         ),
       );
-    if (
-      path[0] === "admin" &&
-      path[1] === "problems" &&
-      path.length === 3 &&
-      method === "PUT"
-    ) {
+    },
+    PUT: async (request, path) => {
       const input = await body<ProblemBody>(request, ["title", "difficulty", "tags", "content", "enabled", "partitions"], validProblemPatch);
       if (!input) return error(4000, "invalid JSON");
       const patch: ProblemPatch = {
@@ -218,13 +201,8 @@ async function handle(request: NextRequest, path: string[]) {
           ),
         ),
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "problems" &&
-      path.length === 3 &&
-      method === "DELETE"
-    ) {
+    },
+    DELETE: async (request, path) => {
       await rpc(
         "AdminProblemService",
         "deleteProblem",
@@ -232,14 +210,11 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return new NextResponse(null, { status: 204 });
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "problems" &&
-      path[3] === "package" &&
-      path.length === 4 &&
-      method === "POST"
-    )
+    },
+  },
+  {
+    path: "admin/problems/:problemId/package",
+    POST: async (request, path) => {
       return proxyUpload(
         request,
         `/internal/v1/problems/${encodeURIComponent(path[2])}/package`,
@@ -247,13 +222,11 @@ async function handle(request: NextRequest, path: string[]) {
         process.env.ADMIN_BFF_SERVICE_TOKEN ?? "",
         megabytes(process.env.MAX_JUDGE_PROGRAM_SIZE_MB, 10 * 1024 ** 3),
       );
-    if (
-      path[0] === "admin" &&
-      path[1] === "problems" &&
-      path[3] === "test-submissions" &&
-      path.length === 4 &&
-      method === "POST"
-    )
+    },
+  },
+  {
+    path: "admin/problems/:problemId/test-submissions",
+    POST: async (request, path) => {
       return proxyUpload(
         request,
         `/internal/v1/problems/${encodeURIComponent(path[2])}/test-submissions`,
@@ -261,13 +234,18 @@ async function handle(request: NextRequest, path: string[]) {
         process.env.ADMIN_BFF_SERVICE_TOKEN ?? "",
         megabytes(process.env.MAX_SOURCE_SIZE_MB, 10 << 20),
       );
-    if (key === "admin/contests" && method === "GET") {
+    },
+  },
+  {
+    path: "admin/contests",
+    query: ["page", "pageSize", "query", "status"],
+    GET: async (request) => {
       const status = optional(request, "status");
       const x = await rpc(
         "AdminContestService",
         "listContests",
         {
-          page: page(request, ["query", "status"]),
+          page: page(request),
           query: optional(request, "query"),
           status: status
             ? enumInput(ContestStatus, "CONTEST_STATUS_", status)
@@ -276,8 +254,8 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json(paged(x, contest));
-    }
-    if (key === "admin/contests" && method === "POST") {
+    },
+    POST: async (request) => {
       const input = await body<ContestBody>(request, ["title", "startsAt", "endsAt", "description", "problems", "visible", "scoringPolicy"], validContestCreate);
       if (!input) return error(4000, "invalid JSON");
       return json(
@@ -302,13 +280,11 @@ async function handle(request: NextRequest, path: string[]) {
         ),
         201,
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "contests" &&
-      path.length === 3 &&
-      method === "GET"
-    )
+    },
+  },
+  {
+    path: "admin/contests/:contestId",
+    GET: async (request, path) => {
       return json(
         contest(
           await rpc(
@@ -319,12 +295,8 @@ async function handle(request: NextRequest, path: string[]) {
           ),
         ),
       );
-    if (
-      path[0] === "admin" &&
-      path[1] === "contests" &&
-      path.length === 3 &&
-      method === "PUT"
-    ) {
+    },
+    PUT: async (request, path) => {
       const input = await body<ContestBody>(request, ["title", "startsAt", "endsAt", "description", "problems", "visible", "scoringPolicy"], validContestPatch);
       if (!input) return error(4000, "invalid JSON");
       return json(
@@ -359,13 +331,8 @@ async function handle(request: NextRequest, path: string[]) {
           ),
         ),
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "contests" &&
-      path.length === 3 &&
-      method === "DELETE"
-    ) {
+    },
+    DELETE: async (request, path) => {
       await rpc(
         "AdminContestService",
         "deleteContest",
@@ -373,14 +340,12 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return new NextResponse(null, { status: 204 });
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "contests" &&
-      path[3] === "rankings" &&
-      path.length === 4 &&
-      method === "GET"
-    ) {
+    },
+  },
+  {
+    path: "admin/contests/:contestId/rankings",
+    query: ["page", "pageSize"],
+    GET: async (request, path) => {
       const x = await rpc(
         "AdminContestService",
         "listRankings",
@@ -388,31 +353,22 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json(paged(x, leaderboard));
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "contests" &&
-      path[3] === "rankings" &&
-      path.length === 6 &&
-      (method === "POST" || method === "DELETE") &&
-      path[5] === "disqualify"
-    ) {
-      await rpc(
-        "AdminContestService",
-        method === "POST"
-          ? "disqualifyParticipant"
-          : "restoreParticipant",
-        { contestId: numericID(path[2]), userId: numericID(path[4]) },
-        session(request),
-      );
-      return new NextResponse(null, { status: 204 });
-    }
-    if (key === "admin/submissions" && method === "GET") {
+    },
+  },
+  {
+    path: "admin/contests/:contestId/rankings/:userId/disqualify",
+    POST: qualification,
+    DELETE: qualification,
+  },
+  {
+    path: "admin/submissions",
+    query: ["page", "pageSize", "query", "user", "problem", "verdict", "kind"],
+    GET: async (request) => {
       const x = await rpc(
         "AdminSubmissionService",
         "listSubmissions",
         {
-          page: page(request, ["query", "user", "problem", "verdict", "kind"]),
+          page: page(request),
           query: optional(request, "query"),
           user: optional(request, "user"),
           problem: optional(request, "problem"),
@@ -430,13 +386,11 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json(paged(x, submission));
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "submissions" &&
-      path.length === 3 &&
-      method === "GET"
-    ) {
+    },
+  },
+  {
+    path: "admin/submissions/:submissionId",
+    GET: async (request, path) => {
       const x = await rpc(
         "AdminSubmissionService",
         "getSubmission",
@@ -459,26 +413,22 @@ async function handle(request: NextRequest, path: string[]) {
               }
             : null,
       });
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "submissions" &&
-      path[3] === "source" &&
-      path.length === 4 &&
-      method === "GET"
-    )
+    },
+  },
+  {
+    path: "admin/submissions/:submissionId/source",
+    GET: async (request, path) => {
       return proxyDownload(
         request,
         `/internal/v1/admin/submissions/${encodeURIComponent(path[2])}/source`,
         process.env.ADMIN_BFF_SERVICE_TOKEN ?? "",
       );
-    if (
-      path[0] === "admin" &&
-      path[1] === "submissions" &&
-      path[3] === "jobs" &&
-      path.length === 4 &&
-      method === "GET"
-    ) {
+    },
+  },
+  {
+    path: "admin/submissions/:submissionId/jobs",
+    query: ["page", "pageSize"],
+    GET: async (request, path) => {
       const x = await rpc(
         "AdminSubmissionService",
         "listSubmissionJobs",
@@ -486,30 +436,19 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json(paged(x, job));
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "submissions" &&
-      path[3] === "jobs" &&
-      path.length === 6 &&
-      method === "GET" &&
-      (path[5] === "log" || path[5] === "result")
-    )
-      return proxyDownload(
-        request,
-        `/internal/v1/admin/submissions/${encodeURIComponent(path[2])}/jobs/${encodeURIComponent(path[4])}/${path[5]}`,
-        process.env.ADMIN_BFF_SERVICE_TOKEN ?? "",
-        path[5] === "result"
-          ? { contentType: "application/json; charset=utf-8", inline: true }
-          : { contentType: "text/plain; charset=utf-8", inline: true },
-      );
-    if (
-      path[0] === "admin" &&
-      path[1] === "submissions" &&
-      path[3] === "rejudge" &&
-      path.length === 4 &&
-      method === "POST"
-    ) {
+    },
+  },
+  {
+    path: "admin/submissions/:submissionId/jobs/:jobId/log",
+    GET: downloadJobArtifact,
+  },
+  {
+    path: "admin/submissions/:submissionId/jobs/:jobId/result",
+    GET: downloadJobArtifact,
+  },
+  {
+    path: "admin/submissions/:submissionId/rejudge",
+    POST: async (request, path) => {
       const x = await rpc(
         "AdminSubmissionService",
         "rejudgeSubmission",
@@ -527,14 +466,11 @@ async function handle(request: NextRequest, path: string[]) {
         },
         201,
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "submissions" &&
-      path[3] === "cancel" &&
-      path.length === 4 &&
-      method === "POST"
-    ) {
+    },
+  },
+  {
+    path: "admin/submissions/:submissionId/cancel",
+    POST: async (request, path) => {
       const x = await rpc(
         "AdminSubmissionService",
         "cancelSubmission",
@@ -542,13 +478,17 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json(submission(x.submission));
-    }
-    if (key === "admin/users" && method === "GET") {
+    },
+  },
+  {
+    path: "admin/users",
+    query: ["page", "pageSize", "query", "status", "role"],
+    GET: async (request) => {
       const x = await rpc(
         "AdminUserService",
         "listUsers",
         {
-          page: page(request, ["query", "status", "role"]),
+          page: page(request),
           query: optional(request, "query"),
           status: optional(request, "status")
             ? enumInput(UserStatus, "USER_STATUS_", optional(request, "status"))
@@ -565,8 +505,8 @@ async function handle(request: NextRequest, path: string[]) {
           createdAt: timestamp(item?.createdAt),
         })),
       );
-    }
-    if (key === "admin/users" && method === "POST") {
+    },
+    POST: async (request) => {
       const input = await body<CreateUserRequest>(request, ["username", "email"], (value) =>
         isString(value.username) && isString(value.email),
       );
@@ -582,13 +522,11 @@ async function handle(request: NextRequest, path: string[]) {
         { ...authUser(x.user), createdAt: timestamp(x.user?.createdAt) },
         201,
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "users" &&
-      path.length === 3 &&
-      method === "GET"
-    ) {
+    },
+  },
+  {
+    path: "admin/users/:userId",
+    GET: async (request, path) => {
       const x = await rpc(
         "AdminUserService",
         "getUser",
@@ -596,42 +534,8 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json({ ...authUser(x), createdAt: timestamp(x?.createdAt) });
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "users" &&
-      path.length === 3 &&
-      method === "DELETE"
-    ) {
-      await rpc(
-        "AdminUserService",
-        "deleteUser",
-        { id: numericID(path[2]) },
-        session(request),
-      );
-      return new NextResponse(null, { status: 204 });
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "users" &&
-      path[3] === "reset-password" &&
-      path.length === 4 &&
-      method === "POST"
-    ) {
-      const x = await rpc(
-        "AdminUserService",
-        "resetUserPassword",
-        { id: numericID(path[2]) },
-        session(request),
-      );
-      return json({ password: x.password });
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "users" &&
-      path.length === 3 &&
-      method === "PUT"
-    ) {
+    },
+    PUT: async (request, path) => {
       const input = await body<{ email?: string; status?: string }>(request, ["email", "status"], (value) =>
         optionalBody(value.email, isString) && optionalBody(value.status, isString),
       );
@@ -650,8 +554,32 @@ async function handle(request: NextRequest, path: string[]) {
         session(request),
       );
       return json({ ...authUser(x), createdAt: timestamp(x?.createdAt) });
-    }
-    if (key === "admin/system/status" && method === "GET") {
+    },
+    DELETE: async (request, path) => {
+      await rpc(
+        "AdminUserService",
+        "deleteUser",
+        { id: numericID(path[2]) },
+        session(request),
+      );
+      return new NextResponse(null, { status: 204 });
+    },
+  },
+  {
+    path: "admin/users/:userId/reset-password",
+    POST: async (request, path) => {
+      const x = await rpc(
+        "AdminUserService",
+        "resetUserPassword",
+        { id: numericID(path[2]) },
+        session(request),
+      );
+      return json({ password: x.password });
+    },
+  },
+  {
+    path: "admin/system/status",
+    GET: async (request) => {
       const x = await rpc(
         "AdminSystemService",
         "getStatus",
@@ -665,13 +593,17 @@ async function handle(request: NextRequest, path: string[]) {
         runningJobs: Number(x?.runningJobs ?? 0),
         updatedAt: timestamp(x?.updatedAt),
       });
-    }
-    if (key === "admin/system/agents" && method === "GET") {
+    },
+  },
+  {
+    path: "admin/system/agents",
+    query: ["page", "pageSize", "partition", "state"],
+    GET: async (request) => {
       const x = await rpc(
         "AdminSystemService",
         "listAgents",
         {
-          page: page(request, ["partition", "state"]),
+          page: page(request),
           partition: optional(request, "partition"),
           state: optional(request, "state")
             ? enumInput(AgentState, "AGENT_STATE_", optional(request, "state"))
@@ -682,15 +614,11 @@ async function handle(request: NextRequest, path: string[]) {
       return json(
         paged(x, agent),
       );
-    }
-    if (
-      path[0] === "admin" &&
-      path[1] === "system" &&
-      path[2] === "agents" &&
-      path[4] === "drain" &&
-      path.length === 5 &&
-      method === "POST"
-    )
+    },
+  },
+  {
+    path: "admin/system/agents/:agentId/drain",
+    POST: async (request, path) => {
       return json(
         agent(await rpc(
           "AdminSystemService",
@@ -699,23 +627,13 @@ async function handle(request: NextRequest, path: string[]) {
           session(request),
         )),
       );
-    const known = route !== undefined || key.startsWith("auth/");
-    return error(known ? 4050 : 4040, known ? "method not allowed" : "resource not found");
-  } catch (reason) {
-    console.error(
-      "Admin BFF request failed",
-      reason instanceof Error ? reason.message : "unknown error",
-    );
-    return grpcError(reason);
-  }
-}
-export async function GET(request: NextRequest, context: Params) {
-  const response = await handle(request, (await context.params).path);
-  response.headers.set("Cache-Control", "no-store");
-  return response;
-}
-export const POST = GET;
-export const PUT = GET;
-export const DELETE = GET;
+    },
+  },
+] satisfies Route[]);
 
-export const HEAD = GET;
+export const GET = handle;
+export const POST = handle;
+export const PUT = handle;
+export const PATCH = handle;
+export const DELETE = handle;
+export const HEAD = handle;

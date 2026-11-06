@@ -69,12 +69,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
-    try {
-      await authApi.logout();
-    } finally {
-      setUser(null);
-      setStatus("unauthenticated");
-    }
+    await authApi.logout();
+    setUser(null);
+    setStatus("unauthenticated");
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {

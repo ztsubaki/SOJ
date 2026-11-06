@@ -7,9 +7,9 @@
 - **Web**：选手侧Next.js SSR/BFF。
 - **Admin**：管理侧Next.js SSR/BFF。
 - **Control Plane**：Go模块化单体，唯一访问PostgreSQL。
-- **Judge Agent**：Rust Execution Plane代理，主动领取任务并管理Slurm。
+- **Judge Agent**：Rust Execution Plane代理，主动领取任务，通过Slurm或同机Docker执行可信测评包。
 
-PostgreSQL、Artifact backend和Slurm是基础设施，不是独立业务服务。
+PostgreSQL、Artifact backend、Slurm和Docker Engine是基础设施，不是独立业务服务。
 
 ```text
 Browser
@@ -18,7 +18,8 @@ Browser
                                                       ├─ PostgreSQL
                                                       └─ Artifact backend
 Judge Agent ── outbound gRPC / streaming HTTP ──────> Control Plane
-  └─ Slurm -> Container
+  ├─ Slurm -> Container
+  └─ Local Docker Engine -> Container
 ```
 
 ## 边界
@@ -54,7 +55,7 @@ HTTP契约见[`bff-contract.md`](bff-contract.md)，业务权限见[`api.md`](ap
 
 ### Execution Plane
 
-Agent与Slurm节点可以使用集群内部共享workspace。Agent管理Job、校验结果Schema并上报结构化结果；Control Plane保存上报字段，原始结果仅归档、不解析。可信测评包负责执行流程，Slurm强制资源限制；执行契约见[`judge.md`](judge.md)。生命周期与工作负载独立，状态及调度约束见[`state-machines.md`](state-machines.md)，展示字段见[`bff-contract.md`](bff-contract.md)。
+Slurm Agent与计算节点可以使用集群内部共享workspace；Docker Agent只连接同机Unix socket，不要求Slurm或共享集群目录。两种后端复用注册、心跳、队列、Artifact、取消、结果和drain流程，session的executor与Job不可变manifest必须匹配。可信包负责执行和结果可信性；Slurm按batch脚本强制资源限制，Docker按包manifest的固定镜像、CPU/内存/时间限制运行单个受限容器，Docker Agent每次处理一个Job。执行契约见[`judge.md`](judge.md)，状态见[`state-machines.md`](state-machines.md)，展示字段见[`bff-contract.md`](bff-contract.md)。
 
 ## Control Plane
 
@@ -80,14 +81,14 @@ Control Plane是用户、会话、比赛、题目、Submission、Job、Agent ses
 | 选择 | 理由 | 规范 |
 |---|---|---|
 | Control Plane模块化单体，唯一访问PostgreSQL | 业务与调度使用本地事务，避免初期拆分服务 | [数据库](database.md) |
-| Judge Agent主动拉取，Execution Plane独立部署 | 适应Slurm网络边界，隔离数据库凭据 | [执行](judge.md) |
+| Judge Agent主动拉取，Execution Plane独立部署 | 适应Slurm网络边界和单机Docker部署，隔离数据库凭据 | [执行](judge.md) |
 | Submission与不可复用Job分离 | 重测保留执行历史，迟到结果不能覆盖当前结果；无需Attempt层 | [状态机](state-machines.md)、[数据库](database.md) |
 | PostgreSQL持久队列 | 行锁、owner及session状态足以处理领取和重放，无需独立队列或Job lease | [数据库](database.md#claim)、[Judge契约](judge-contract.md) |
 | Agent生命周期与工作负载分离 | 存活、排空意图与执行负载分别表达，避免组合状态及资源遥测 | [状态机](state-machines.md#agent-session) |
 | 认证流式HTTP传Artifact，Browser直接发送原始文件 | 避免multipart解析、大文件进入普通RPC及每次传输凭据编排 | [BFF契约](bff-contract.md#内部流式http)、[Judge契约](judge-contract.md#artifact-http) |
 | 单当前测评包，Job保存执行快照 | 换包不改变已创建执行，无需revision管理 | [数据库](database.md#submission与job) |
-| 包负责执行，Agent只管理Job | 固定脚本及文件协议减少平台执行配置，Slurm强制资源限制 | [执行](judge.md)、[JSON契约](contracts/schema/README.md) |
-| 取消是独立意图，终态响应只返回实际state | 允许取消与Slurm事实竞争，无需命令历史或专用幂等响应表 | [状态机](state-machines.md) |
+| 包定义执行策略，Agent管理后端生命周期 | Slurm使用固定batch脚本；Docker使用固定镜像、受限容器及judge.sh，复用同一Job和结果契约 | [执行](judge.md)、[JSON契约](contracts/schema/README.md) |
+| 取消是独立意图，终态响应只返回实际state | 允许取消与执行事实竞争，无需命令历史或专用幂等响应表 | [状态机](state-machines.md) |
 | Browser只访问同源BFF | 统一Cookie、CSRF与传输适配，Control Plane执行最终授权 | [BFF契约](bff-contract.md)、[协议](protocols.md) |
 | 总分制同时支持best/latest | 两种策略都有明确业务需求；按请求查询当前Job，无需汇总同步 | [业务规则](api.md#评分与排行榜) |
 | 比赛结束后固定时间、赛题和评分策略 | 比赛结束前允许运营调整，结束后保留稳定的排名和公开题目口径；仍允许题面修正、换包与重测 | [修改窗口](api.md#管理修改) |
@@ -96,7 +97,7 @@ Control Plane是用户、会话、比赛、题目、Submission、Job、Agent ses
 | 用户使用opaque session；Agent共享服务token | 适配单一可信Execution Plane运维边界；共享token泄露按整个Execution Plane泄露处置 | [认证](api.md#认证与角色)、[协议](protocols.md#认证) |
 | 动态数据统一不缓存 | 消除公开/私有和统计/普通对象的缓存例外及失效机制 | [动态数据](#动态数据) |
 | Agent校验Schema并上报结构化结果，原始文件仅归档 | 结果解析职责集中在Agent，Control Plane完成事务无需读回文件 | [Judge契约](judge-contract.md#completejob) |
-| Rust仅exec Slurm CLI，固定JSON查询 | 构建不依赖Slurm库、头文件或FFI；第一版不维护版本探测、格式回退及多套适配器 | [执行](judge.md#slurm-交互) |
+| Rust只通过Slurm/Docker CLI管理执行 | 不依赖Slurm库或Docker SDK；后端差异局限于提交、状态、取消和清理，不复制控制面流程 | [执行](judge.md#后端交互) |
 | 单实例、停机同步升级 | 第一版不承担HA、滚动兼容及自动恢复协议 | [部署](#部署)、[升级](protocols.md#升级) |
 | 不设置应用内管理审计表，普通日志输出stdout/stderr | 第一版避免引入审计保留、查询与脱敏模型 | [保留](database.md#保留)、[可观测性](#可观测性) |
 

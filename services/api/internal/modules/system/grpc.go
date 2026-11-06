@@ -136,7 +136,7 @@ func (s *GRPCServer) agents(ctx context.Context, partition *string, want string,
 		where = " WHERE partition=$2"
 	}
 	query := `WITH listed AS (
- SELECT a.id,a.partition,a.last_heartbeat_at,a.registered_at,a.drain_requested_at,a.ended_at,
+ SELECT a.id,a.partition,a.executor,a.last_heartbeat_at,a.registered_at,a.drain_requested_at,a.ended_at,
    (SELECT count(*) FROM judge_jobs j WHERE j.agent_session_id=a.id AND j.state IN ('claimed','submitted','running','finishing'))::int AS active_jobs,
  (SELECT count(*) FROM judge_jobs j WHERE j.agent_session_id=a.id AND j.state IN ('claimed','submitted'))::int AS waiting_jobs,
    CASE WHEN a.offline_at IS NOT NULL OR (a.ended_at IS NULL AND a.last_heartbeat_at<=now()-$%d::interval) THEN 'offline'
@@ -144,7 +144,7 @@ func (s *GRPCServer) agents(ctx context.Context, partition *string, want string,
         WHEN a.drain_requested_at IS NOT NULL THEN 'draining'
         ELSE 'online' END AS derived_state
  FROM agent_sessions a` + where + `)
- SELECT id,partition,last_heartbeat_at,registered_at,drain_requested_at,ended_at,active_jobs,waiting_jobs,derived_state FROM listed`
+ SELECT id,partition,executor,last_heartbeat_at,registered_at,drain_requested_at,ended_at,active_jobs,waiting_jobs,derived_state FROM listed`
 	query = fmt.Sprintf(query, 1)
 	args = append([]any{judge.OfflineThreshold.String()}, args...)
 	if want != "" {
@@ -164,15 +164,15 @@ func (s *GRPCServer) agents(ctx context.Context, partition *string, want string,
 	defer rows.Close()
 	items := []*sojv1.AgentSession{}
 	for rows.Next() {
-		var id, part, derived string
+		var id, part, executor, derived string
 		var active, waiting int32
 		var heartbeat, created time.Time
 		var drain, ended *time.Time
-		if err = rows.Scan(&id, &part, &heartbeat, &created, &drain, &ended, &active, &waiting, &derived); err != nil {
+		if err = rows.Scan(&id, &part, &executor, &heartbeat, &created, &drain, &ended, &active, &waiting, &derived); err != nil {
 			return nil, 0, err
 		}
 		state, _ := agentStateProto(derived)
-		item := &sojv1.AgentSession{Id: id, Partition: part, State: state, LastHeartbeatAt: timestamppb.New(heartbeat), CreatedAt: timestamppb.New(created), ActiveJobCount: uint32(active), WaitingJobCount: uint32(waiting), RunningJobCount: uint32(active - waiting), Workload: sojv1.AgentWorkload_AGENT_WORKLOAD_EMPTY}
+		item := &sojv1.AgentSession{Id: id, Partition: part, Executor: rpcutil.ExecutorProto(executor), State: state, LastHeartbeatAt: timestamppb.New(heartbeat), CreatedAt: timestamppb.New(created), ActiveJobCount: uint32(active), WaitingJobCount: uint32(waiting), RunningJobCount: uint32(active - waiting), Workload: sojv1.AgentWorkload_AGENT_WORKLOAD_EMPTY}
 		if waiting > 0 {
 			item.Workload = sojv1.AgentWorkload_AGENT_WORKLOAD_QUEUED
 		} else if active > 0 {

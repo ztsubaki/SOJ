@@ -1,7 +1,6 @@
 import { uploadHeaders } from "@soj/bff/upload";
 import { request } from "@soj/bff/client";
-import type { Problem } from "@/lib/server/bff";
-import type { Submission } from "@/lib/server/bff";
+import type { LeaderboardEntry, Problem, Submission } from "@/lib/server/bff";
 
 type Registration = { contestId: number; registeredAt: string };
 type CreatedSubmission = {
@@ -58,6 +57,13 @@ export function getSubmission(id: number) {
 
 export type Page<T> = { items: T[]; page: number; pageSize: number; total: number };
 export type Participant = { user: { id: number; username: string }; registeredAt: string };
+
+export function listLeaderboard(contestId: number, page: number, signal?: AbortSignal) {
+  return request<Page<LeaderboardEntry>>(
+    `/contests/${encodeURIComponent(contestId)}/leaderboard?page=${page}&pageSize=20`,
+    { signal },
+  );
+}
 
 export function listParticipants(contestId: number, page: number) {
   return request<Page<Participant>>(

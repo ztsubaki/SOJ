@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,6 +32,12 @@ type Service struct {
 const DefaultMaxJudgeProgramSize = 10 << 30
 const maxPackageFiles = 10000
 const maxPackageUnpackedSize = 10 << 30
+const maxPackageManifestSize = 1 << 20
+const maxPackageArchiveSize = maxPackageUnpackedSize + (maxPackageFiles+1)*1024
+const maxPackagePathDepth = 64
+
+// Reserve package/, submission/, source, output/, tmp/, run-output/ and job.json.
+const maxPackageMaterializedEntries = 20000 - 7
 
 func NewService(pool *pgxpool.Pool, artifactRoot string, maxJudgeProgramSize int64) *Service {
 	if pool == nil {
@@ -160,24 +167,24 @@ func (s *Service) CanAdminSetPackage(ctx context.Context, id int64) error {
 	return nil
 }
 
-type packageManifest struct {
-	SchemaVersion int   `json:"schemaVersion"`
-	ProblemID     int64 `json:"problemId"`
-}
-
-// readPackageManifestReader validates the package manifest and fixed batch script.
-func readPackageManifestReader(src io.Reader) (packageManifest, error) {
+// readPackageManifestReader validates the manifest, selected root script and all
+// archive entries before a package can become an immutable Artifact.
+func readPackageManifestReader(src io.Reader) (validation.PackageManifest, error) {
+	var manifest validation.PackageManifest
 	zr, err := zstd.NewReader(src)
 	if err != nil {
-		return packageManifest{}, errors.New("package must be tar.zst")
+		return manifest, errors.New("package must be tar.zst")
 	}
 	defer zr.Close()
-	tr := tar.NewReader(zr)
-	var manifest packageManifest
-	var found, batch bool
+	// Bound decompressed metadata and padding as well as declared file contents.
+	archive := &io.LimitedReader{R: zr, N: maxPackageArchiveSize + 1}
+	tr := tar.NewReader(archive)
+	var found bool
 	var total int64
 	files := 0
-	names := map[string]bool{}
+	materialized := 0
+	names := map[string]byte{}
+	directories := map[string]bool{}
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -187,35 +194,100 @@ func readPackageManifestReader(src io.Reader) (packageManifest, error) {
 			return manifest, err
 		}
 		files++
-		total += h.Size
-		if files > maxPackageFiles || total > maxPackageUnpackedSize || strings.HasPrefix(h.Name, "/") || filepath.Clean(h.Name) == ".." || strings.HasPrefix(filepath.Clean(h.Name), "../") || h.Typeflag == tar.TypeSymlink || h.Typeflag == tar.TypeLink {
-			return manifest, errors.New("unsafe package archive")
+		if files > maxPackageFiles || h.Size < 0 || h.Size > maxPackageUnpackedSize-total {
+			return manifest, errors.New("unsafe package archive size")
 		}
-		if h.Typeflag != tar.TypeReg {
+		total += h.Size
+		if h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA && h.Typeflag != tar.TypeDir {
+			return manifest, errors.New("unsafe package archive entry type")
+		}
+		if h.Typeflag == tar.TypeDir && h.Size != 0 {
+			return manifest, errors.New("unsafe package directory size")
+		}
+		if h.Name == "" || strings.HasPrefix(h.Name, "/") || strings.ContainsAny(h.Name, "\\\x00") {
+			return manifest, errors.New("unsafe package archive path")
+		}
+		for i, component := range strings.Split(h.Name, "/") {
+			if component == ".." || (i == 0 && (component == "." || strings.Contains(component, ":"))) {
+				return manifest, errors.New("unsafe package archive path")
+			}
+		}
+		name := path.Clean(h.Name)
+		if strings.Count(name, "/")+1 >= maxPackagePathDepth {
+			return manifest, errors.New("package path exceeds workspace depth limit")
+		}
+		if h.Typeflag != tar.TypeDir && (strings.HasSuffix(h.Name, "/") || strings.HasSuffix(h.Name, "/.")) {
+			return manifest, errors.New("unsafe package archive path")
+		}
+		if _, exists := names[name]; exists {
+			return manifest, errors.New("duplicate package entry")
+		}
+		if !directories[name] {
+			materialized++
+		}
+		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
+			kind, explicit := names[parent]
+			if explicit && kind != tar.TypeDir {
+				return manifest, errors.New("package file conflicts with directory")
+			}
+			if !explicit && !directories[parent] {
+				materialized++
+			}
+			directories[parent] = true
+		}
+		if materialized > maxPackageMaterializedEntries {
+			return manifest, errors.New("package entries exceed initial workspace limit")
+		}
+		if h.Typeflag != tar.TypeDir && directories[name] {
+			return manifest, errors.New("package file conflicts with directory")
+		}
+		names[name] = h.Typeflag
+		if h.Typeflag == tar.TypeDir {
 			continue
 		}
-		if names[h.Name] {
-			return manifest, errors.New("duplicate package file")
-		}
-		names[h.Name] = true
-		if h.Name == "judge.sbatch" {
-			batch = true
-		}
-		if h.Name == "manifest.json" {
-			d := json.NewDecoder(io.LimitReader(tr, 1<<20))
-			d.DisallowUnknownFields()
-			if err := d.Decode(&manifest); err != nil {
-				return manifest, errors.New("invalid manifest")
+		if name == "manifest.json" {
+			if h.Size > maxPackageManifestSize {
+				return manifest, errors.New("manifest exceeds size limit")
 			}
-			if d.Decode(new(any)) != io.EOF {
-				return manifest, errors.New("invalid manifest trailing data")
+			raw, err := io.ReadAll(tr)
+			if err != nil {
+				return manifest, err
+			}
+			manifest, err = validation.ParsePackageManifest(raw)
+			if err != nil {
+				return manifest, err
 			}
 			found = true
 		}
-
 	}
-	if !found || manifest.SchemaVersion != 1 || manifest.ProblemID <= 0 || !batch {
-		return manifest, errors.New("invalid manifest")
+	// tar stops at its end marker. Consume the full zstd stream to validate its
+	// checksum and ensure the upload hash covers every byte, allowing only tar
+	// zero padding after the marker rather than an unchecked second archive.
+	var padding [32 << 10]byte
+	for {
+		n, err := archive.Read(padding[:])
+		for _, value := range padding[:n] {
+			if value != 0 {
+				return manifest, errors.New("unexpected data after package archive")
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return manifest, err
+		}
+	}
+	if archive.N == 0 {
+		return manifest, errors.New("unsafe package archive size")
+	}
+	script := "judge.sbatch"
+	if manifest.Executor() == "docker" {
+		script = "judge.sh"
+	}
+	kind, exists := names[script]
+	if !found || !exists || (kind != tar.TypeReg && kind != tar.TypeRegA) {
+		return manifest, errors.New("package requires manifest.json and a regular root " + script)
 	}
 	return manifest, nil
 }

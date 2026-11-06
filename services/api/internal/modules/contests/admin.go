@@ -80,18 +80,42 @@ GROUP BY c.id ORDER BY c.starts_at DESC,c.id ASC LIMIT $%d OFFSET $%d`, statusSQ
 	}
 	defer rows.Close()
 	items := []AdminContest{}
+	contestIDs := []int64{}
+	byContestID := map[int64]int{}
 	for rows.Next() {
 		item, err := scanContest(rows)
 		if err != nil {
 			return nil, 0, err
 		}
-		item.Problems, err = s.problemSummaries(ctx, item.ID)
-		if err != nil {
-			return nil, 0, err
-		}
+		item.Problems = []ProblemSummary{}
+		contestIDs = append(contestIDs, item.ID)
+		byContestID[item.ID] = len(items)
 		items = append(items, item)
 	}
-	return items, total, rows.Err()
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(items) == 0 {
+		return items, total, nil
+	}
+	problemRows, err := s.pool.Query(ctx, `SELECT cp.contest_id,p.id,p.title,p.difficulty,p.tags
+FROM contest_problems cp JOIN problems p ON p.id=cp.problem_id
+WHERE cp.contest_id=ANY($1::bigint[]) ORDER BY cp.contest_id,cp.ordinal`, contestIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer problemRows.Close()
+	for problemRows.Next() {
+		var contestID int64
+		var problem ProblemSummary
+		if err = problemRows.Scan(&contestID, &problem.ID, &problem.Title, &problem.Difficulty, &problem.Tags); err != nil {
+			return nil, 0, err
+		}
+		index := byContestID[contestID]
+		items[index].Problems = append(items[index].Problems, problem)
+	}
+	return items, total, problemRows.Err()
 }
 
 func (s *Service) AdminGet(ctx context.Context, id int64) (AdminContest, error) {
@@ -219,7 +243,7 @@ func (s *Service) AdminDelete(ctx context.Context, actorID int64, id int64) erro
 	if _, err = tx.Exec(ctx, `UPDATE submissions SET current_job_id=NULL WHERE contest_id=$1`, id); err != nil {
 		return err
 	}
-	refs, err := deleteJobs(ctx, tx, `DELETE FROM judge_jobs WHERE submission_id IN (SELECT id FROM submissions WHERE contest_id=$1)`, id)
+	refs, pendingKeys, err := artifacts.DeleteSubmissionJobs(ctx, tx, `SELECT id FROM submissions WHERE contest_id=$1`, id)
 	if err != nil {
 		return err
 	}
@@ -244,32 +268,8 @@ func (s *Service) AdminDelete(ctx context.Context, actorID int64, id int64) erro
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
-	artifacts.RemoveObjects(s.artifactRoot, removed)
+	artifacts.RemoveObjects(s.artifactRoot, append(pendingKeys, removed...))
 	return nil
-}
-
-func deleteJobs(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]int64, error) {
-	rows, err := tx.Query(ctx, query+` RETURNING source_artifact_id,package_artifact_id,result_artifact_id,log_artifact_id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	refs := []int64{}
-	for rows.Next() {
-		var source, pkg int64
-		var result, log *int64
-		if err := rows.Scan(&source, &pkg, &result, &log); err != nil {
-			return nil, err
-		}
-		refs = append(refs, source, pkg)
-		if result != nil {
-			refs = append(refs, *result)
-		}
-		if log != nil {
-			refs = append(refs, *log)
-		}
-	}
-	return refs, rows.Err()
 }
 
 func deleteSubmissions(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]int64, error) {

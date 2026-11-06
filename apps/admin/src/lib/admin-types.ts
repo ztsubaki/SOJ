@@ -93,9 +93,11 @@ export type UserDetail = {
   status: "active" | "disabled";
   createdAt?: string;
 };
+export type AgentExecutor = "slurm" | "docker";
 export type AgentSession = {
   id: string;
   partition: string;
+  executor: AgentExecutor;
   state: "online" | "draining" | "ended" | "offline";
   workload: "empty" | "no_queue" | "queued";
   waitingJobCount: number;
@@ -107,7 +109,15 @@ export type SubmissionJob = {
   id: number;
   state: string;
   agentSessionId: string | null;
-  slurmJobId: string | null;
+  executionId: string | null;
+  executionSnapshot: {
+    packageArtifactId: number;
+    packageSha256: string;
+    manifest: Record<string, unknown>;
+    eligiblePartitions: string[];
+    assignedPartition: string | null;
+    executor: AgentExecutor;
+  };
   verdict: string | null;
   score: string | null;
   statusMessage: string | null;

@@ -1,6 +1,6 @@
 import type { Timestamp } from "../generated/google/protobuf/timestamp";
-import type { Struct } from "../generated/google/protobuf/struct";
 import type {
+  AgentExecutor,
   AgentSession,
   Contest,
   Job,
@@ -117,32 +117,6 @@ export function paged<T, R>(
     total: Number(value.page?.total ?? 0),
   };
 }
-function protoValue(value: unknown): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(protoValue);
-  const record = value as Record<string, unknown>;
-
-  // ts-proto unwraps google.protobuf.Value to native JavaScript values. Keep
-  // accepting proto-loader's old wrapper shape in tests and at this boundary.
-  if ("nullValue" in record) return null;
-  if ("stringValue" in record) return record.stringValue;
-  if ("numberValue" in record) return record.numberValue;
-  if ("boolValue" in record) return record.boolValue;
-  if ("structValue" in record) return protoValue(record.structValue);
-  if ("listValue" in record) return protoValue(record.listValue);
-  if ("values" in record) return protoValue(record.values);
-  return Object.fromEntries(
-    Object.entries(record).map(([key, item]) => [key, protoValue(item)]),
-  );
-}
-export function structValue(value?: Struct): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(value?.fields ?? {}).map(([key, item]) => [
-      key,
-      protoValue(item),
-    ]),
-  );
-}
 export function adminProblem(value: Problem = {}) {
   const pkg = value.package;
   return {
@@ -156,7 +130,7 @@ export function adminProblem(value: Problem = {}) {
           artifactId: pkg.artifactId ?? 0,
           sha256: pkg.sha256 ?? "",
           sizeBytes: Number(pkg.sizeBytes ?? 0),
-          manifest: structValue(pkg.manifest),
+          manifest: pkg.manifest ?? {},
           uploadedAt: timestamp(pkg.uploadedAt),
         }
       : null,
@@ -179,13 +153,14 @@ export function job(value: Job = {}) {
     submissionId: value.submissionId ?? 0,
     state: (value.state ?? "").replace("JOB_STATE_", "").toLowerCase(),
     agentSessionId: value.agentSessionId ?? null,
-    slurmJobId: value.slurmJobId ?? null,
+    executionId: value.executionId ?? null,
     executionSnapshot: {
       packageArtifactId: snapshot?.packageArtifactId ?? 0,
       packageSha256: snapshot?.packageSha256 ?? "",
-      manifest: structValue(snapshot?.manifest),
+      manifest: snapshot?.manifest ?? {},
       eligiblePartitions: snapshot?.eligiblePartitions ?? [],
       assignedPartition: snapshot?.assignedPartition ?? null,
+      executor: executor(snapshot?.executor),
     },
     verdict: value.verdict
       ? value.verdict.replace("VERDICT_", "").toLowerCase()
@@ -207,10 +182,22 @@ export function workload(value?: { empty?: number; noQueue?: number; queued?: nu
   return { empty: Number(value?.empty ?? 0), noQueue: Number(value?.noQueue ?? 0), queued: Number(value?.queued ?? 0) };
 }
 
+function executor(value?: AgentExecutor): "slurm" | "docker" {
+  switch (value) {
+    case "AGENT_EXECUTOR_SLURM":
+      return "slurm";
+    case "AGENT_EXECUTOR_DOCKER":
+      return "docker";
+    default:
+      throw new Error("Invalid agent executor in Control Plane response");
+  }
+}
+
 export function agent(item: AgentSession = {}) {
   return {
     id: item.id ?? "",
     partition: item.partition ?? "",
+    executor: executor(item.executor),
     state: (item.state ?? "").replace("AGENT_STATE_", "").toLowerCase(),
     workload: (item.workload ?? "").replace("AGENT_WORKLOAD_", "").toLowerCase(),
     activeJobCount: Number(item.activeJobCount ?? 0),

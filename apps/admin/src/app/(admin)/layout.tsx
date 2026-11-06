@@ -3,6 +3,7 @@ import Panel from "@/components/ui/Panel";
 
 import { useSidebar } from "@/context/SidebarContext";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
@@ -18,6 +19,19 @@ export default function AdminLayout({
   const { isExpanded, isHovered, isMobileOpen } = useSidebar();
   const { user, status, signOut } = useAuth();
   const router = useRouter();
+  const { show } = useToast();
+  const [isSigningOut, setIsSigningOut] = React.useState(false);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } catch (reason) {
+      show(reason instanceof Error ? `退出失败：${reason.message}` : "退出失败，请稍后重试。", "error");
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
 
   React.useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
@@ -56,7 +70,9 @@ export default function AdminLayout({
             ，无法访问管理后台。
           </p>
           <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
-            <Button onClick={() => void signOut()}>退出登录</Button>
+            <Button disabled={isSigningOut} onClick={() => void handleSignOut()}>
+              {isSigningOut ? "退出中..." : "退出登录"}
+            </Button>
           </div>
         </Panel>
       </main>

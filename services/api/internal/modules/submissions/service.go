@@ -26,13 +26,11 @@ const DefaultMaxSourceSize = 10 << 20
 type Submission struct {
 	ID                   int64
 	ProblemTitle         string
-	UserID               int64
 	ProblemID            int64
 	ContestID            *int64 `json:"contestId,omitempty"`
 	Kind                 string
 	Status               string
 	CreatedAt, UpdatedAt time.Time
-	Verdict              string  `json:"verdict,omitempty"`
 	Score                *string `json:"score,omitempty"`
 	JudgeMessage         *string `json:"judgeMessage,omitempty"`
 	CurrentJobID         *int64
@@ -55,8 +53,8 @@ type StagedSource struct {
 
 type Job struct {
 	ID, SubmissionID, PackageArtifactID                              int64
-	State, PackageSHA256                                             string
-	AgentSessionID, AssignedPartition, SlurmJobID                    *string
+	State, PackageSHA256, Executor                                   string
+	AgentSessionID, AssignedPartition, ExecutionID                   *string
 	Manifest                                                         map[string]any
 	EligiblePartitions                                               []string
 	Verdict, Score, Message                                          *string
@@ -169,7 +167,9 @@ func (s *Service) create(ctx context.Context, aid, user int64, problem, contest 
 	var sha string
 	var manifest []byte
 	var parts []string
-	err = tx.QueryRow(ctx, `SELECT p.package_artifact_id,a.sha256,p.package_manifest,p.candidate_partitions FROM problems p JOIN artifacts a ON a.id=p.package_artifact_id AND a.kind='problem_package' AND a.state='available' WHERE p.id=$1 AND p.enabled FOR SHARE`, problem).Scan(&pkg, &sha, &manifest, &parts)
+	// Pin the package pointer on the problem, not the Artifact row: Retain
+	// updates its reference count and must not upgrade concurrent SHARE locks.
+	err = tx.QueryRow(ctx, `SELECT p.package_artifact_id,a.sha256,p.package_manifest,p.candidate_partitions FROM problems p JOIN artifacts a ON a.id=p.package_artifact_id AND a.kind='problem_package' AND a.state='available' WHERE p.id=$1 AND p.enabled FOR SHARE OF p`, problem).Scan(&pkg, &sha, &manifest, &parts)
 	if err != nil || len(parts) == 0 {
 		return 0, errors.New("problem has no runnable package")
 	}
@@ -358,7 +358,9 @@ func (s *Service) RejudgeAsAdmin(ctx context.Context, actorID int64, id int64) (
 	if state != "completed" && state != "cancelled" && state != "internal_error" {
 		return Submission{}, 0, errors.New("current job is not terminal")
 	}
-	if err = tx.QueryRow(ctx, `SELECT p.package_artifact_id,a.sha256,p.package_manifest,p.candidate_partitions FROM submissions s JOIN problems p ON p.id=s.problem_id JOIN artifacts a ON a.id=p.package_artifact_id AND a.kind='problem_package' AND a.state='available' WHERE s.id=$1 AND p.enabled FOR SHARE`, id).Scan(&pkg, &sha, &manifest, &parts); err != nil || len(parts) == 0 {
+	// The submission/job locks pin the source; only the problem needs a SHARE
+	// lock to keep the current package stable until its new reference is held.
+	if err = tx.QueryRow(ctx, `SELECT p.package_artifact_id,a.sha256,p.package_manifest,p.candidate_partitions FROM submissions s JOIN problems p ON p.id=s.problem_id JOIN artifacts a ON a.id=p.package_artifact_id AND a.kind='problem_package' AND a.state='available' WHERE s.id=$1 AND p.enabled FOR SHARE OF p`, id).Scan(&pkg, &sha, &manifest, &parts); err != nil || len(parts) == 0 {
 		return Submission{}, 0, errors.New("problem has no runnable package")
 	}
 	var job int64
@@ -415,13 +417,13 @@ func (s *Service) AdminCancel(ctx context.Context, actorID int64, id int64) (Sub
 
 const submissionStatusSQL = `COALESCE(CASE j.state WHEN 'completed' THEN j.verdict WHEN 'cancelled' THEN 'cancelled' WHEN 'internal_error' THEN 'system_error' WHEN 'claimed' THEN 'pending' WHEN 'submitted' THEN 'pending' WHEN 'running' THEN 'judging' WHEN 'finishing' THEN 'judging' ELSE 'pending' END,'pending')`
 
-const submissionSelect = `SELECT s.id,s.user_id,s.problem_id,p.title,s.contest_id,s.kind,
+const submissionSelect = `SELECT s.id,s.problem_id,p.title,s.contest_id,s.kind,
  ` + submissionStatusSQL + `,
- s.created_at,GREATEST(s.updated_at,j.updated_at),COALESCE(j.verdict,''),CASE WHEN j.state='completed' THEN j.score::text ELSE NULL END,CASE WHEN j.state='completed' THEN j.message ELSE NULL END,s.current_job_id,j.log_artifact_id
+ s.created_at,GREATEST(s.updated_at,j.updated_at),CASE WHEN j.state='completed' THEN j.score::text ELSE NULL END,CASE WHEN j.state='completed' THEN j.message ELSE NULL END,s.current_job_id,j.log_artifact_id
  FROM submissions s JOIN problems p ON p.id=s.problem_id LEFT JOIN judge_jobs j ON j.id=s.current_job_id`
 
 func submissionScanArgs(item *Submission) []any {
-	return []any{&item.ID, &item.UserID, &item.ProblemID, &item.ProblemTitle, &item.ContestID, &item.Kind, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.Verdict, &item.Score, &item.JudgeMessage, &item.CurrentJobID, &item.CurrentLogArtifactID}
+	return []any{&item.ID, &item.ProblemID, &item.ProblemTitle, &item.ContestID, &item.Kind, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.Score, &item.JudgeMessage, &item.CurrentJobID, &item.CurrentLogArtifactID}
 }
 
 func (s *Service) listWhere(ctx context.Context, where string, args []any, page, size int) ([]Submission, int, error) {
@@ -447,18 +449,23 @@ func (s *Service) listWhere(ctx context.Context, where string, args []any, page,
 	return items, total, rows.Err()
 }
 
-const jobSelect = `SELECT j.id,j.submission_id,j.state,j.agent_session_id,j.assigned_partition,j.slurm_job_id,j.package_artifact_id,j.package_sha256,j.manifest,j.eligible_partitions,j.verdict,j.score::text,j.message,j.result_artifact_id,j.log_artifact_id,j.cancel_requested_at,j.created_at,j.claimed_at,j.submitted_at,j.started_at,j.finished_at FROM judge_jobs j`
+const jobSelect = `SELECT j.id,j.submission_id,j.state,j.agent_session_id,j.assigned_partition,j.execution_id,j.package_artifact_id,j.package_sha256,j.manifest,j.eligible_partitions,j.verdict,j.score::text,j.message,j.result_artifact_id,j.log_artifact_id,j.cancel_requested_at,j.created_at,j.claimed_at,j.submitted_at,j.started_at,j.finished_at FROM judge_jobs j`
 
 type jobScanner interface{ Scan(...any) error }
 
 func scanJob(row jobScanner) (Job, error) {
 	var item Job
 	var manifest []byte
-	if err := row.Scan(&item.ID, &item.SubmissionID, &item.State, &item.AgentSessionID, &item.AssignedPartition, &item.SlurmJobID, &item.PackageArtifactID, &item.PackageSHA256, &manifest, &item.EligiblePartitions, &item.Verdict, &item.Score, &item.Message, &item.ResultArtifactID, &item.LogArtifactID, &item.CancelRequestedAt, &item.CreatedAt, &item.ClaimedAt, &item.SubmittedAt, &item.StartedAt, &item.FinishedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.SubmissionID, &item.State, &item.AgentSessionID, &item.AssignedPartition, &item.ExecutionID, &item.PackageArtifactID, &item.PackageSHA256, &manifest, &item.EligiblePartitions, &item.Verdict, &item.Score, &item.Message, &item.ResultArtifactID, &item.LogArtifactID, &item.CancelRequestedAt, &item.CreatedAt, &item.ClaimedAt, &item.SubmittedAt, &item.StartedAt, &item.FinishedAt); err != nil {
 		return Job{}, err
 	}
 	if err := json.Unmarshal(manifest, &item.Manifest); err != nil {
 		return Job{}, err
 	}
+	packageManifest, err := validation.ParsePackageManifest(manifest)
+	if err != nil {
+		return Job{}, err
+	}
+	item.Executor = packageManifest.Executor()
 	return item, nil
 }

@@ -7,25 +7,11 @@ import (
 
 	"github.com/ztsubaki/soj/services/api/internal/rpcauth"
 	"github.com/ztsubaki/soj/services/api/internal/serverconfig"
-	"github.com/ztsubaki/soj/services/api/internal/validation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
-
-func TestBusinessID(t *testing.T) {
-	for _, value := range []string{"a", "A-1._~", "job-123", "0start"} {
-		if !validation.BusinessID(value) {
-			t.Errorf("BusinessID(%q) = false, want true", value)
-		}
-	}
-	for _, value := range []string{"", ".leading", "_leading", "-leading", "~leading", "space here"} {
-		if validation.BusinessID(value) {
-			t.Errorf("BusinessID(%q) = true, want false", value)
-		}
-	}
-}
 
 func TestUnaryInterceptorRequiresDeadline(t *testing.T) {
 	interceptor := rpcauth.UnaryInterceptor("agent", "web", "admin")

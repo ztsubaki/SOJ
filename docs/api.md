@@ -10,6 +10,8 @@ Web/Admin的JSON请求体最多1 MiB（按实际读取字节计），超限返�
 
 Browser只访问同源 Web 或 Admin BFF。Control Plane 不提供任何 `/api/v1` 浏览器业务接口；对该历史路径的请求返回 `410 Gone`。Control Plane 的 HTTP 面仅保留健康检查，以及供 BFF 或 Judge 使用的、由 [`protocols.md`](protocols.md) 定义的内部 Artifact 流式端点。
 
+Web与Admin保留各自业务路由及服务身份，公开注册和请求注册验证码仅由Web提供。两端复用BFF路由校验与响应处理；路径、method和查询参数错误的优先级统一见[`bff-contract.md`](bff-contract.md#错误与cookie)。
+
 ## 认证与角色
 
 Web与Admin使用同一Control Plane管理账号和登录session；这不表示每个账号只能有一个session。
@@ -100,6 +102,8 @@ Problem的“当前公开”只在请求时判断：当前`contest_problems`关�
 
 排名只按总分降序，同分共享rank，user ID只用于稳定展示。排行榜赛前不公开，赛中和赛后公开。每个排行榜条目同时按当前比赛题目顺序返回各题派生得分；各题分数依照相同的`best`或`latest`规则计算，没有有效得分时为0，且其和等于总分。
 
+公开和管理排行榜均按页读取；分页只限制响应条目，不改变全场计分、同分共享名次、取消资格过滤或每条记录的完整分题成绩。HTTP分页形状以[`bff-contract.md`](bff-contract.md)为准。
+
 `solved`表示比赛赛题中，current Job verdict为accepted的不同赛题数；`submissions`表示这些赛题下的contest Submission数；`lastSubmission`取这些Submission最新创建时间。Admin test和Job重试次数不计入这些字段。
 
 ## Problem
@@ -110,7 +114,7 @@ tags只是Problem上的文本数组，不建立独立Tag实体、标签管理接
 
 Problem必须有非空候选partitions。没有有效package时不能创建Job。
 
-测评包与执行职责见[`judge.md`](judge.md)，文件字段由JSON Schema定义。
+测评包与执行职责见[`judge.md`](judge.md)，文件字段由JSON Schema定义。Slurm包使用judge.sbatch；Docker包提供固定镜像、CPU/内存/超时配置及judge.sh。候选partition必须部署相应executor的Agent；类型不匹配的Job保持pending，不能由另一类Agent执行。换包或重测仍使用不可变执行快照，不改变已创建Job的类型。
 
 `enabled=false`后：
 
@@ -128,7 +132,7 @@ Submission输入是一个非空、不超过部署上限的不透明文件。平�
 
 Submission不持久化执行状态或结果投影，只保存`current_job_id`及提交本身的业务事实。对外`status`、`score`和`message`在每次查询时从current Job的状态和结果派生，状态筛选和统计也使用同一规则。rejudge创建新Job并切换指针，立即使旧结果退出Web、排名和统计；新Job失败不恢复旧结果。详细投影见[`state-machines.md`](state-machines.md)。
 
-只有Admin可以取消。pending Job直接取消；活动Job记录取消意图并等待Agent与Slurm确认。取消不能覆盖已经完成的合法结果。
+只有Admin可以取消。pending Job直接取消；活动Job记录取消意图并等待Agent及其Slurm/Docker后端确认停止。取消不能覆盖已经完成的合法结果。
 
 ### Admin test
 
@@ -140,6 +144,6 @@ Browser只通过同源BFF上传和下载。contest Submission owner可以读取�
 
 ## Admin系统能力
 
-Admin可以查看平台统计、Agent session和Job历史，并请求Agent drain。生命周期、工作负载和drain规则见[`state-machines.md`](state-machines.md#agent-session)，响应字段及聚合范围见[`bff-contract.md`](bff-contract.md)。
+Admin可以查看平台统计、Agent session的Slurm/Docker类型、Job执行ID及历史，并请求Agent drain。生命周期、工作负载和drain规则见[`state-machines.md`](state-machines.md#agent-session)，响应字段及聚合范围见[`bff-contract.md`](bff-contract.md)。
 
 Admin写操作不产生应用内审计记录。普通运维日志由部署环境提供，不通过Admin API查询。
